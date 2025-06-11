@@ -1,43 +1,42 @@
+# settings_ui.py
 import customtkinter as ctk
-from tkinter import messagebox, filedialog, ttk # ttk برای Treeview
+from tkinter import messagebox, filedialog, ttk
 import os
-from datetime import datetime
-from PIL import Image, ImageTk
+from PIL import Image
 
-# Import کردن managerها و مدل‌ها از روت پروژه
 from settings_manager import SettingsManager
-from service_manager import ServiceManager 
-from models import AppSettings, Service 
-from db_manager import DBManager, DATABASE_NAME 
+from service_manager import ServiceManager
+from models import AppSettings, Service
+from db_manager import DBManager, DATABASE_NAME
 
 class SettingsUI(ctk.CTkFrame):
     def __init__(self, parent, db_manager, ui_colors, base_font, heading_font, button_font, nav_button_font):
-        super().__init__(parent, fg_color="transparent") 
+        super().__init__(parent, fg_color="transparent")
         self.parent = parent
         self.db_manager = db_manager
         self.settings_manager = SettingsManager()
-        self.service_manager = ServiceManager() 
-        self.ui_colors = ui_colors 
-        self.base_font = base_font 
+        self.service_manager = ServiceManager()
+        self.ui_colors = ui_colors
+        self.base_font = base_font
         self.heading_font = heading_font
         self.button_font = button_font
-        self.nav_button_font = nav_button_font 
+        self.nav_button_font = nav_button_font
         self.current_settings = AppSettings()
 
-        self.frames = {} 
-        self.current_logo_image = None 
+        self.frames = {}
+        self.current_logo_image = None
         
-        self.selected_service_id = None 
-        self.delete_service_button = None 
-        self.service_description_var = None 
-        self.service_settlement_type_combobox = None 
-        self.service_code_var = None # --- جدید: برای کد خدمت ---
-        self.service_table = None 
+        self.selected_service_id = None
+        self.delete_service_button = None
+        self.service_description_var = None
+        # self.service_settlement_type_combobox = None # حذف شد
+        self.service_code_var = None
+        self.service_table = None
 
         self.create_widgets()
         
-        self.current_active_sub_button = None 
-        self.current_active_sub_page_name = None 
+        self.current_active_sub_button = None
+        self.current_active_sub_page_name = None
         
         self.after(100, lambda: self.on_sub_nav_button_click("seller_info", self.seller_info_btn))
 
@@ -46,32 +45,28 @@ class SettingsUI(ctk.CTkFrame):
         """ ویجت‌های مربوط به تنظیمات برنامه را ایجاد می‌کند. """
         settings_card_frame = ctk.CTkFrame(self, fg_color="white", corner_radius=10, 
                                            border_width=1, border_color=self.ui_colors["border_gray"])
-        settings_card_frame.grid(row=0, column=0, padx=20, pady=20, sticky="nsew") 
+        settings_card_frame.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        settings_card_frame.grid_rowconfigure(0, weight=0) 
-        settings_card_frame.grid_rowconfigure(1, weight=1) 
-        settings_card_frame.grid_columnconfigure(0, weight=1) 
+        settings_card_frame.grid_rowconfigure(0, weight=0)
+        settings_card_frame.grid_rowconfigure(1, weight=1)
+        settings_card_frame.grid_columnconfigure(0, weight=1)
 
-        self.sub_navbar_frame = ctk.CTkFrame(settings_card_frame, fg_color="white", corner_radius=0) 
-        self.sub_navbar_frame.grid(row=0, column=0, padx=0, pady=0, sticky="ew") 
-        # --- اضافه کردن پدینگ بیشتر بین نوبار داخلی و محتوا ---
-        self.sub_navbar_frame.grid_rowconfigure(0, weight=1) # برای کشیدن سطر دکمه‌ها
-        self.sub_navbar_frame.grid_columnconfigure(0, weight=1) 
-        self.sub_navbar_frame.grid_columnconfigure(1, weight=0) 
-        self.sub_navbar_frame.grid_columnconfigure(2, weight=1) 
-        # --------------------------------------------------------
+        self.sub_navbar_frame = ctk.CTkFrame(settings_card_frame, fg_color="white", corner_radius=0)
+        self.sub_navbar_frame.grid(row=0, column=0, padx=0, pady=0, sticky="ew")
+        self.sub_navbar_frame.grid_rowconfigure(0, weight=1)
+        self.sub_navbar_frame.grid_columnconfigure(0, weight=1)
+        self.sub_navbar_frame.grid_columnconfigure(1, weight=0)
+        self.sub_navbar_frame.grid_columnconfigure(2, weight=1)
         
         sub_buttons_container = ctk.CTkFrame(self.sub_navbar_frame, fg_color="transparent")
-        sub_buttons_container.grid(row=0, column=1, sticky="nsew") 
+        sub_buttons_container.grid(row=0, column=1, sticky="nsew")
         
-        sub_buttons_container.grid_columnconfigure(0, weight=0) 
-        sub_buttons_container.grid_columnconfigure(1, weight=0) 
-        sub_buttons_container.grid_rowconfigure(0, weight=1) 
+        sub_buttons_container.grid_columnconfigure(0, weight=0)
+        sub_buttons_container.grid_columnconfigure(1, weight=0)
+        sub_buttons_container.grid_rowconfigure(0, weight=1)
         
-        # --- ترتیب دکمه‌های منوی سبز معکوس شد ---
-        # دکمه "اطلاعات فروشنده" (جدیداً راست‌ترین)
         self.seller_info_btn = ctk.CTkButton(sub_buttons_container, text="اطلاعات فروشنده", 
                                               font=self.nav_button_font,
                                               fg_color=self.ui_colors["white"], 
@@ -79,9 +74,8 @@ class SettingsUI(ctk.CTkFrame):
                                               hover_color=self.ui_colors["hover_light_blue"],
                                               corner_radius=8,
                                               command=lambda: self.on_sub_nav_button_click("seller_info", self.seller_info_btn))
-        self.seller_info_btn.grid(row=0, column=1, padx=5, pady=10) 
+        self.seller_info_btn.grid(row=0, column=1, padx=5, pady=10)
 
-        # دکمه "انواع خدمات" (جدیداً چپ‌ترین)
         self.service_types_btn = ctk.CTkButton(sub_buttons_container, text="انواع خدمات", 
                                                 font=self.nav_button_font, 
                                                 fg_color=self.ui_colors["white"], 
@@ -89,22 +83,20 @@ class SettingsUI(ctk.CTkFrame):
                                                 hover_color=self.ui_colors["hover_light_blue"],
                                                 corner_radius=8,
                                                 command=lambda: self.on_sub_nav_button_click("service_types", self.service_types_btn))
-        self.service_types_btn.grid(row=0, column=0, padx=5, pady=10) 
-        # -------------------------------------------------------------
+        self.service_types_btn.grid(row=0, column=0, padx=5, pady=10)
 
         self.settings_content_frame = ctk.CTkFrame(settings_card_frame, fg_color="white") 
-        # --- اضافه کردن پدینگ بیشتر بین نوبار داخلی و محتوا (پدینگ بالا 20) ---
         self.settings_content_frame.grid(row=1, column=0, padx=20, pady=(20, 20), sticky="nsew") 
         self.settings_content_frame.grid_rowconfigure(0, weight=1)
         self.settings_content_frame.grid_columnconfigure(0, weight=1)
 
         self.seller_info_form = self.create_seller_info_form(self.settings_content_frame)
         self.frames["seller_info"] = self.seller_info_form
-        self.seller_info_form.grid(row=0, column=0, sticky="nsew") 
+        self.seller_info_form.grid(row=0, column=0, sticky="nsew")
 
         self.service_types_page = self.create_service_types_form(self.settings_content_frame) 
         self.frames["service_types"] = self.service_types_page
-        self.service_types_page.grid(row=0, column=0, sticky="nsew") 
+        self.service_types_page.grid(row=0, column=0, sticky="nsew")
 
         self.show_sub_frame("seller_info")
 
@@ -125,12 +117,12 @@ class SettingsUI(ctk.CTkFrame):
         form_inner_frame.grid_columnconfigure(1, weight=0) 
 
         labels_info = [
-            ("نام فروشنده:", "seller_name", "entry"), 
-            ("آدرس:", "seller_address", "entry"),     
-            ("تلفن:", "seller_phone", "entry"),       
-            ("شناسه ملی:", "seller_tax_id", "entry"),    
-            ("کد اقتصادی:", "seller_economic_code", "entry"), 
-            ("لوگو:", "seller_logo_path", "logo")     
+            ("نام فروشنده", "seller_name", "entry"), # حذف ":"
+            ("آدرس", "seller_address", "entry"),     # حذف ":"
+            ("تلفن", "seller_phone", "entry"),       # حذف ":"
+            ("شناسه ملی", "seller_tax_id", "entry"),    # حذف ":"
+            ("کد اقتصادی", "seller_economic_code", "entry"), # حذف ":"
+            ("لوگو", "seller_logo_path", "logo")     # حذف ":"
         ]
 
         self.entries = {} 
@@ -191,48 +183,39 @@ class SettingsUI(ctk.CTkFrame):
         parent_frame.grid_rowconfigure(0, weight=1)
         parent_frame.grid_columnconfigure(0, weight=1)
 
-        service_types_frame.grid_columnconfigure(0, weight=1) # ستون چپ (جدول)
-        service_types_frame.grid_columnconfigure(1, weight=0) # ستون راست (فرم)
+        service_types_frame.grid_columnconfigure(0, weight=1) 
+        service_types_frame.grid_columnconfigure(1, weight=0) 
         service_types_frame.grid_rowconfigure(0, weight=1) 
 
-        # --- ستون سمت راست: فرم افزودن/ویرایش خدمت ---
         form_frame = ctk.CTkFrame(service_types_frame, fg_color="white", corner_radius=10, 
                                   border_width=1, border_color=self.ui_colors["border_gray"])
         form_frame.grid(row=0, column=1, padx=(10, 0), pady=0, sticky="nsew") 
         
-        form_frame.grid_columnconfigure(0, weight=1) # فیلدها
-        form_frame.grid_columnconfigure(1, weight=0) # لیبل‌ها
+        form_frame.grid_columnconfigure(0, weight=1) 
+        form_frame.grid_columnconfigure(1, weight=0) 
         
         form_title_label = ctk.CTkLabel(form_frame, text="خدمت جدید / ویرایش خدمت", 
                                         font=self.heading_font, text_color=self.ui_colors["text_dark_gray"])
         form_title_label.grid(row=0, column=0, columnspan=2, padx=20, pady=15, sticky="e")
 
-        # --- فیلد کد خدمت (جدید) ---
-        ctk.CTkLabel(form_frame, text="کد خدمت:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=1, column=1, padx=10, pady=10, sticky="e")
+        # حذف ":"
+        ctk.CTkLabel(form_frame, text="کد خدمت", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=1, column=1, padx=10, pady=10, sticky="e")
         self.service_code_var = ctk.StringVar()
         service_code_entry = ctk.CTkEntry(form_frame, textvariable=self.service_code_var, width=250, justify="right",
                                           font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5)
         service_code_entry.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
-        # ---------------------------
-
-        ctk.CTkLabel(form_frame, text="شرح خدمت:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=2, column=1, padx=10, pady=10, sticky="e")
+        
+        # حذف ":"
+        ctk.CTkLabel(form_frame, text="شرح خدمت", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=2, column=1, padx=10, pady=10, sticky="e")
         self.service_description_var = ctk.StringVar() 
         description_entry = ctk.CTkEntry(form_frame, textvariable=self.service_description_var, width=250, justify="right",
                                          font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5)
         description_entry.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-        ctk.CTkLabel(form_frame, text="نوع تسویه:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=3, column=1, padx=10, pady=10, sticky="e")
-        self.service_settlement_type_var = ctk.StringVar() 
-        self.service_settlement_type_combobox = ctk.CTkComboBox(form_frame, variable=self.service_settlement_type_var,
-                                                         values=["ماهانه", "سالانه", "پروژه ای"],
-                                                         width=250, justify="right", font=self.base_font,
-                                                         dropdown_font=self.base_font,
-                                                         command=self.combobox_selected_callback) 
-        self.service_settlement_type_combobox.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
-        self.service_settlement_type_combobox.set("ماهانه") 
-        
+        # فیلد نوع تسویه حذف شد
+
         buttons_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
-        buttons_frame.grid(row=4, column=0, columnspan=2, pady=20)
+        buttons_frame.grid(row=3, column=0, columnspan=2, pady=20) # سطر به 3 تغییر یافت
         
         save_button = ctk.CTkButton(buttons_frame, text="ذخیره", 
                                     font=self.button_font, fg_color=self.ui_colors["accent_blue"], 
@@ -243,20 +226,19 @@ class SettingsUI(ctk.CTkFrame):
         clear_button = ctk.CTkButton(buttons_frame, text="جدید", 
                                      font=self.button_font, fg_color="#999999", 
                                      hover_color="#777777", text_color="white", corner_radius=8,
-                                     width=60, # --- نصف اندازه ---
-                                     height=30, # --- نصف اندازه ---
+                                     width=60, 
+                                     height=30, 
                                      command=self.clear_service_form) 
         clear_button.pack(side="right", padx=5) 
 
         self.delete_service_button = ctk.CTkButton(buttons_frame, text="حذف", 
                                            font=self.button_font, fg_color="#dc3545", 
                                            hover_color="#c82333", text_color="white", corner_radius=8,
-                                           width=60, # --- نصف اندازه ---
-                                           height=30, # --- نصف اندازه ---
+                                           width=60, 
+                                           height=30, 
                                            command=self.delete_service_from_db, state="disabled") 
         self.delete_service_button.pack(side="left", padx=5) 
 
-        # --- ستون سمت چپ: جدول نمایش خدمات ---
         table_frame = ctk.CTkFrame(service_types_frame, fg_color="white", corner_radius=10, 
                                    border_width=1, border_color=self.ui_colors["border_gray"])
         table_frame.grid(row=0, column=0, padx=(0, 10), pady=0, sticky="nsew") 
@@ -267,23 +249,22 @@ class SettingsUI(ctk.CTkFrame):
         self.tree_scrollbar = ctk.CTkScrollbar(table_frame)
         self.tree_scrollbar.pack(side="right", fill="y")
         
-        self.service_table = ttk.Treeview(table_frame, columns=("ID", "Code", "Description", "SettlementType"), show="headings", # --- ستون Code اضافه شد ---
+        # ستون "SettlementType" حذف شد
+        self.service_table = ttk.Treeview(table_frame, columns=("ID", "Code", "Description"), show="headings", 
                                            yscrollcommand=self.tree_scrollbar.set)
         self.service_table.pack(fill="both", expand=True)
 
         self.tree_scrollbar.configure(command=self.service_table.yview)
 
-        # --- تنظیمات ستون‌ها (ID حذف شد، Code اضافه شد) ---
         self.service_table.heading("ID", text="شناسه", anchor="e") 
-        self.service_table.heading("Code", text="کد خدمت", anchor="e") # --- جدید ---
+        self.service_table.heading("Code", text="کد خدمت", anchor="e") 
         self.service_table.heading("Description", text="شرح خدمت", anchor="e")
-        self.service_table.heading("SettlementType", text="نوع تسویه", anchor="e")
+        # ستون SettlementType حذف شد
 
-        self.service_table.column("ID", width=0, stretch=False) # --- ID مخفی شد ---
-        self.service_table.column("Code", width=80, anchor="e", stretch=False) # --- جدید ---
-        self.service_table.column("Description", width=200, anchor="e", stretch=True) # عرض تنظیم شد
-        self.service_table.column("SettlementType", width=100, anchor="e", stretch=False)
-        # ----------------------------------------------------------------------------------
+        self.service_table.column("ID", width=0, stretch=False) 
+        self.service_table.column("Code", width=80, anchor="e", stretch=False) 
+        self.service_table.column("Description", width=200, anchor="e", stretch=True) 
+        # ستون SettlementType حذف شد
 
         self.service_table.bind("<<TreeviewSelect>>", self.on_service_select) 
         self.service_table.bind("<Double-1>", self.on_service_double_click) 
@@ -307,6 +288,9 @@ class SettingsUI(ctk.CTkFrame):
         if file_path:
             self.logo_path_var.set(file_path)
             self.display_logo_preview(file_path)
+            # به MainApplication اطلاع بده که لوگو تغییر کرده تا در نوبار به روز شود
+            if hasattr(self.parent, 'master') and hasattr(self.parent.master, 'load_and_display_logo'):
+                self.parent.master.load_and_display_logo()
 
     def display_logo_preview(self, file_path):
         """ نمایش پیش‌نمایش لوگو در UI """
@@ -375,13 +359,16 @@ class SettingsUI(ctk.CTkFrame):
 
         if self.settings_manager.save_settings(updated_settings):
             messagebox.showinfo("موفقیت", "تنظیمات با موفقیت ذخیره شد!", master=self)
-            self.current_settings = self.settings_manager.get_settings() 
+            self.current_settings = self.settings_manager.get_settings()
+            # به MainApplication اطلاع بده که لوگو تغییر کرده
+            if hasattr(self.parent, 'master') and hasattr(self.parent.master, 'load_and_display_logo'):
+                self.parent.master.load_and_display_logo()
         else:
             messagebox.showerror("خطا در ذخیره تنظیمات", "خطا در ذخیره تنظیمات.", master=self)
 
-    def combobox_selected_callback(self, choice):
-        """ callback برای انتخاب از Combobox (در فرم خدمات) """
-        print("Combobox selected:", choice)
+    # def combobox_selected_callback(self, choice): # حذف شد
+    #     """ callback برای انتخاب از Combobox (در فرم خدمات) """
+    #     print("Combobox selected:", choice)
 
     def load_services_to_table(self):
         """ بارگذاری خدمات از دیتابیس به جدول (در فرم خدمات) """
@@ -393,22 +380,22 @@ class SettingsUI(ctk.CTkFrame):
             pass 
 
         for service in services:
-            # --- نمایش service_code در جدول ---
+            # SettlementType حذف شد
             self.service_table.insert("", "end", iid=service.id, 
-                                     values=(service.id, service.service_code, service.description, service.settlement_type))
+                                     values=(service.id, service.service_code, service.description))
 
     def clear_service_form(self):
         """ پاک کردن فیلدهای فرم خدمات و غیرفعال کردن دکمه حذف """
         self.service_description_var.set("")
-        self.service_settlement_type_combobox.set("ماهانه") 
-        self.service_code_var.set(str(self.service_manager.get_next_service_code())) # --- کد بعدی رو خودکار پر کن ---
+        # self.service_settlement_type_combobox.set("ماهانه") # حذف شد
+        self.service_code_var.set(str(self.service_manager.get_next_service_code()))
         self.selected_service_id = None
         self.delete_service_button.configure(state="disabled") 
 
     def save_service(self):
         """ ذخیره (افزودن/ویرایش) خدمت در دیتابیس """
         description = self.service_description_var.get().strip()
-        settlement_type = self.service_settlement_type_combobox.get()
+        # settlement_type = self.service_settlement_type_combobox.get() # حذف شد
         service_code_str = self.service_code_var.get().strip()
         service_code = None
 
@@ -422,15 +409,17 @@ class SettingsUI(ctk.CTkFrame):
         if not description:
             messagebox.showwarning("خطای ورودی", "شرح خدمت نمی‌تواند خالی باشد.", master=self)
             return
-        if not settlement_type:
-            messagebox.showwarning("خطای ورودی", "نوع تسویه نمی‌تواند خالی باشد.", master=self)
-            return
+        # if not settlement_type: # حذف شد
+        #     messagebox.showwarning("خطای ورودی", "نوع تسویه نمی‌تواند خالی باشد.", master=self)
+        #     return
         
         if self.selected_service_id: # حالت ویرایش
-            service_obj = Service(id=self.selected_service_id, service_code=service_code, description=description, settlement_type=settlement_type)
+            # settlement_type از اینجا هم حذف شد
+            service_obj = Service(id=self.selected_service_id, service_code=service_code, description=description)
             success, message = self.service_manager.update_service(service_obj)
         else: # حالت افزودن جدید
-            service_obj = Service(service_code=service_code, description=description, settlement_type=settlement_type)
+            # settlement_type از اینجا هم حذف شد
+            service_obj = Service(service_code=service_code, description=description)
             success, message = self.service_manager.add_service(service_obj)
 
         if success:
@@ -463,9 +452,9 @@ class SettingsUI(ctk.CTkFrame):
             values = self.service_table.item(selected_item_id, "values")
             
             self.selected_service_id = int(values[0]) 
-            self.service_code_var.set(str(values[1])) # --- کد خدمت را هم پر کن ---
+            self.service_code_var.set(str(values[1])) 
             self.service_description_var.set(values[2])
-            self.service_settlement_type_combobox.set(values[3])
+            # self.service_settlement_type_combobox.set(values[3]) # حذف شد
             self.delete_service_button.configure(state="normal") 
         else:
             self.clear_service_form() 

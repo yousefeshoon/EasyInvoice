@@ -1,11 +1,17 @@
+# main_app.py
 import customtkinter as ctk
 from tkinter import messagebox
 import os
 import sys
-import configparser # --- اضافه شد: برای خواندن/نوشتن فایل INI ---
+import configparser
+from PIL import Image, ImageTk 
 
 from db_manager import DBManager, DATABASE_NAME
 from settings_ui import SettingsUI 
+from customer_ui import CustomerUI
+from contract_ui import ContractUI 
+from invoice_manager_ui import InvoiceManagerUI # تغییر: Import InvoiceManagerUI بجای دوتا فایل جداگانه
+from settings_manager import SettingsManager 
 
 class MainApplication(ctk.CTk):
     def __init__(self):
@@ -13,10 +19,9 @@ class MainApplication(ctk.CTk):
         
         self.version_config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.ini")
         
-        # --- مدیریت ورژن برنامه ---
+        self.settings_manager = SettingsManager() 
         self.app_version_string = self._get_and_increment_build_version()
-        self.title(f"سیستم آسان‌فاکتور (Easy Invoice) - {self.app_version_string}") 
-        # ---------------------------------------------------
+        self.title(f"سیستم آسان‌فاکتور (Easy Invoice) - {self.app_version_string}")
 
         self.update_idletasks() 
         screen_width = self.winfo_screenwidth()
@@ -42,33 +47,14 @@ class MainApplication(ctk.CTk):
         self.button_font = (default_font_family, default_font_size + 1)
         self.nav_button_font = (default_font_family, default_font_size + 1, "bold")
         
-        # --- اصلاح مسیر دیتابیس برای محیط PyInstaller ---
         if getattr(sys, 'frozen', False):
-            # اگر برنامه از یک فایل exe (PyInstaller) اجرا شده است
-            # مسیر دیتابیس را کنار فایل exe قرار می‌دهیم.
             db_base_path = os.path.dirname(sys.executable)
         else:
-            # اگر برنامه از کد پایتون معمولی اجرا شده است
             db_base_path = os.path.dirname(os.path.abspath(__file__))
         self.db_path = os.path.join(db_base_path, DATABASE_NAME)
-        # ----------------------------------------
         
         self.db_manager = DBManager(self.db_path)
         
-        try:
-            if not self.db_manager.connect():
-                messagebox.showerror("خطا در اتصال به دیتابیس", "امکان اتصال به دیتابیس وجود ندارد! برنامه بسته خواهد شد.", master=self)
-                self.destroy()
-                return
-            
-            self.db_manager.create_tables()
-            self.db_manager.migrate_database()
-            self.db_manager.close() 
-        except Exception as e:
-            messagebox.showerror("خطای راه‌اندازی دیتابیس", f"خطا در راه‌اندازی دیتابیس: {e}\nبرنامه بسته خواهد شد.", master=self)
-            self.destroy()
-            return
-
         self.ui_colors = {
             "background_light_gray": "#F0F2F5", 
             "text_dark_gray": "#333333", 
@@ -85,14 +71,16 @@ class MainApplication(ctk.CTk):
             "white": "white",
             "border_gray": "#cccccc",
         }
-
+        
+        self.app_logo_label = None 
         self.create_widgets()
         self.frames = {}
         self.init_frames()
         self.current_active_top_button = None 
         self.current_active_top_page_name = None 
         
-        self.show_reports_page_on_start() 
+        self.show_reports_page_on_start()
+        self.load_and_display_logo() 
 
     def _read_version_data(self):
         """ مقادیر ورژن را از فایل version.ini می‌خواند. """
@@ -103,9 +91,8 @@ class MainApplication(ctk.CTk):
         build_c = 0
         try:
             if not os.path.exists(self.version_config_file_path):
-                # اگر فایل وجود نداشت، با مقادیر پیش‌فرض ایجادش کن
                 self._write_version_data(major, compile_c, build_c)
-                config.read(self.version_config_file_path) # دوباره بخوان
+                config.read(self.version_config_file_path)
             else:
                 config.read(self.version_config_file_path)
 
@@ -114,7 +101,6 @@ class MainApplication(ctk.CTk):
             build_c = config.getint('Version', 'BUILD_COUNT', fallback=0)
         except Exception as e:
             print(f"Warning: Error reading version from {self.version_config_file_path}: {e}. Using default version (1.00(0)).")
-            # در صورت خطا، با مقادیر پیش‌فرض شروع کن و فایل را با آن‌ها بنویس
             self._write_version_data(1, 0, 0)
             return 1, 0, 0
         return major, compile_c, build_c
@@ -141,7 +127,6 @@ class MainApplication(ctk.CTk):
         """
         current_major, current_compile_c, current_build_c = self._read_version_data()
         
-        # افزایش BUILD_COUNT (BB)
         current_build_c += 1
         
         self._write_version_data(current_major, current_compile_c, current_build_c)
@@ -157,13 +142,40 @@ class MainApplication(ctk.CTk):
         current_major, current_compile_c, current_build_c = self._read_version_data()
         
         current_compile_c += 1
-        if current_compile_c > self.VERSION_MINOR_LIMIT_APP: # VERSION_MINOR_LIMIT_APP که 99 است
+        if current_compile_c > 99: 
             current_major += 1
             current_compile_c = 0
             
         self._write_version_data(current_major, current_compile_c, current_build_c)
         
         return f"v{current_major}.{current_compile_c:02d}({current_build_c})"
+
+    def load_and_display_logo(self):
+        """ لوگوی فروشنده را بارگذاری کرده و در نوبار نمایش می‌دهد. """
+        settings = self.settings_manager.get_settings()
+        logo_path = settings.seller_logo_path
+        
+        if self.app_logo_label: 
+            self.app_logo_label.destroy()
+            self.app_logo_label = None
+
+        if logo_path and os.path.exists(logo_path):
+            try:
+                image_pil = Image.open(logo_path)
+                image_pil = image_pil.resize((50, 50), Image.LANCZOS) 
+                ctk_image = ctk.CTkImage(light_image=image_pil, dark_image=image_pil, size=(50, 50))
+                
+                self.app_logo_label = ctk.CTkLabel(self.navbar_frame, image=ctk_image, text="")
+                self.app_logo_label.grid(row=0, column=2, padx=20, pady=5, sticky="e") 
+                self.app_logo_label.image = ctk_image 
+                
+            except Exception as e:
+                print(f"Error loading logo for main app: {e}")
+                self.app_logo_label = ctk.CTkLabel(self.navbar_frame, text="سیستم آسان‌فاکتور", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"])
+                self.app_logo_label.grid(row=0, column=2, padx=20, pady=10, sticky="e")
+        else:
+            self.app_logo_label = ctk.CTkLabel(self.navbar_frame, text="سیستم آسان‌فاکتور", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"])
+            self.app_logo_label.grid(row=0, column=2, padx=20, pady=10, sticky="e")
 
 
     def show_reports_page_on_start(self):
@@ -172,8 +184,7 @@ class MainApplication(ctk.CTk):
         ctk.CTkLabel(reports_placeholder_page, text="گزارش اصلی برنامه (در دست ساخت)", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"]).pack(pady=50)
         
         self.frames["reports"] = reports_placeholder_page
-        reports_placeholder_page.grid(row=0, column=0, sticky="nsew")
-        self.show_frame("reports") 
+        self.show_frame("reports") # نمایش صفحه گزارشات به عنوان صفحه پیش فرض
 
     def create_widgets(self):
         """ ایجاد ویجت‌های اصلی برنامه (نوبار بالا و فریم کانتنت) """
@@ -183,10 +194,7 @@ class MainApplication(ctk.CTk):
         self.navbar_frame.grid_columnconfigure(0, weight=1) 
         self.navbar_frame.grid_columnconfigure(1, weight=1) 
         self.navbar_frame.grid_columnconfigure(2, weight=1) 
-
-        title_label = ctk.CTkLabel(self.navbar_frame, text="عنوان برنامه", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"])
-        title_label.grid(row=0, column=2, padx=20, pady=10, sticky="e") 
-
+        
         nav_buttons_container = ctk.CTkFrame(self.navbar_frame, fg_color="transparent") 
         nav_buttons_container.grid(row=0, column=1)
         
@@ -195,7 +203,8 @@ class MainApplication(ctk.CTk):
         nav_buttons_container.grid_columnconfigure(2, weight=0) 
         nav_buttons_container.grid_columnconfigure(3, weight=0) 
         nav_buttons_container.grid_columnconfigure(4, weight=0) 
-        nav_buttons_container.grid_columnconfigure(5, weight=1) 
+        nav_buttons_container.grid_columnconfigure(5, weight=0) # این دیگه نیاز نیست، ولی برای حفظ گرید می‌تونیم نگهش داریم یا حذفش کنیم
+        nav_buttons_container.grid_columnconfigure(6, weight=1) 
 
         self.settings_btn = ctk.CTkButton(nav_buttons_container, text="تنظیمات", 
                                           font=self.nav_button_font,
@@ -215,24 +224,28 @@ class MainApplication(ctk.CTk):
                                            command=lambda: self.on_top_nav_button_click("customers", self.customers_btn))
         self.customers_btn.grid(row=0, column=2, padx=5, pady=0)
 
-        self.contracts_btn = ctk.CTkButton(nav_buttons_container, text="ثبت قرارداد", 
+        self.contracts_btn = ctk.CTkButton(nav_buttons_container, text="مدیریت قراردادها", 
                                            font=self.nav_button_font,
                                            fg_color=self.ui_colors["background_light_gray"], 
                                            text_color=self.ui_colors["text_medium_gray"],
                                            hover_color=self.ui_colors["hover_light_blue"],
                                            corner_radius=8,
-                                           command=lambda: self.on_top_nav_button_click("contracts", self.contracts_btn))
-        self.contracts_btn.grid(row=0, column=3, padx=5, pady=0)
+                                           command=lambda: self.on_top_nav_button_click("contracts", self.contracts_btn)) 
+        self.contracts_btn.grid(row=0, column=3, padx=5, pady=0) 
 
-        self.invoice_btn = ctk.CTkButton(nav_buttons_container, text="صدور صورتحساب", 
+        # دکمه جدید برای "مدیریت صورتحساب ها"
+        self.invoice_manager_btn = ctk.CTkButton(nav_buttons_container, text="مدیریت صورتحساب‌ها", 
                                          font=self.nav_button_font,
                                          fg_color=self.ui_colors["background_light_gray"], 
                                          text_color=self.ui_colors["text_medium_gray"],
                                          hover_color=self.ui_colors["hover_light_blue"],
                                          corner_radius=8,
-                                         command=lambda: self.on_top_nav_button_click("invoice", self.invoice_btn))
-        self.invoice_btn.grid(row=0, column=4, padx=5, pady=0) 
+                                         command=lambda: self.on_top_nav_button_click("invoice_manager", self.invoice_manager_btn))
+        self.invoice_manager_btn.grid(row=0, column=4, padx=5, pady=0) 
         
+        # دکمه های "صدور صورتحساب" و "لیست صورتحساب‌ها" حذف شدند
+        # self.invoice_main_btn و self.invoice_list_btn دیگر اینجا نیستند
+
         empty_placeholder_btn = ctk.CTkButton(self.navbar_frame, text="", 
                                          font=self.nav_button_font, 
                                          fg_color=self.ui_colors["background_light_gray"], 
@@ -258,9 +271,24 @@ class MainApplication(ctk.CTk):
         self.frames["settings"] = settings_page
         settings_page.grid(row=0, column=0, sticky="nsew")
 
-        add_customer_placeholder = ctk.CTkLabel(self.content_frame, text="فرم افزودن مشتری جدید (به زودی)", font=self.heading_font)
-        self.frames["add_customer"] = add_customer_placeholder
-        add_customer_placeholder.grid(row=0, column=0, sticky="nsew")
+        customer_page = CustomerUI(self.content_frame, self.db_manager, self.ui_colors,
+                                   self.base_font, self.heading_font, self.button_font, self.nav_button_font)
+        self.frames["customers"] = customer_page
+        customer_page.grid(row=0, column=0, sticky="nsew")
+
+        contract_page = ContractUI(self.content_frame, self.db_manager, self.ui_colors,
+                                   self.base_font, self.heading_font, self.button_font, self.nav_button_font)
+        self.frames["contracts"] = contract_page
+        contract_page.grid(row=0, column=0, sticky="nsew")
+
+        # اضافه شده: فریم UI مدیریت صورتحساب (که شامل زیرتب‌ها می‌شود)
+        invoice_manager_page = InvoiceManagerUI(self.content_frame, self.db_manager, self.ui_colors,
+                                   self.base_font, self.heading_font, self.button_font, self.nav_button_font)
+        self.frames["invoice_manager"] = invoice_manager_page
+        invoice_manager_page.grid(row=0, column=0, sticky="nsew")
+        
+        # فریم‌های invoice_main_ui و invoice_list_ui دیگر اینجا به صورت مستقیم مقداردهی اولیه نمی‌شوند
+
 
     def show_frame(self, page_name):
         """ نمایش یک فریم خاص بر اساس نام آن """
@@ -296,16 +324,28 @@ class MainApplication(ctk.CTk):
             messagebox.showwarning("صفحه هنوز پیاده‌سازی نشده", f"صفحه '{page_name}' هنوز در دست ساخت است.", master=self)
             
             if self.current_active_top_page_name:
+                # این قسمت باید با توجه به ساختار جدید دکمه‌ها به‌روزرسانی شود
+                # مطمئن شویم که دکمه فعال قبلی استایل خود را حفظ می‌کند
+                active_button_ref = None
                 if self.current_active_top_page_name == "settings":
-                    self.settings_btn.configure(
+                    active_button_ref = self.settings_btn
+                elif self.current_active_top_page_name == "reports": 
+                    pass # Reports has no dedicated button yet
+                elif self.current_active_top_page_name == "customers":
+                    active_button_ref = self.customers_btn
+                elif self.current_active_top_page_name == "contracts":
+                    active_button_ref = self.contracts_btn
+                elif self.current_active_top_page_name == "invoice_manager":
+                    active_button_ref = self.invoice_manager_btn
+                
+                if active_button_ref:
+                    active_button_ref.configure(
                         fg_color=self.ui_colors["active_button_bg"], 
                         text_color=self.ui_colors["active_button_text"],
                         border_width=2, 
                         border_color=self.ui_colors["active_button_border"] 
                     )
-                    self.current_active_top_button = self.settings_btn
-                elif self.current_active_top_page_name == "reports": 
-                    pass
+                    self.current_active_top_button = active_button_ref
             
 
     def on_closing(self):
@@ -314,7 +354,31 @@ class MainApplication(ctk.CTk):
             self.db_manager.close() 
             self.destroy()
 
+    def _initialize_database(self):
+        """
+        این متد مسئول اتصال و راه‌اندازی دیتابیس است.
+        در صورت بروز خطا، True را برمی‌گرداند تا برنامه ادامه یابد، در غیر این صورت False.
+        """
+        try:
+            if not self.db_manager.connect():
+                messagebox.showerror("خطا در اتصال به دیتابیس", "امکان اتصال به دیتابیس وجود ندارد! برنامه بسته خواهد شد.", master=self)
+                return False
+            
+            self.db_manager.create_tables()
+            self.db_manager.migrate_database()
+            self.db_manager.close() 
+            return True
+        except Exception as e:
+            messagebox.showerror("خطای راه‌اندازی دیتابیس", f"خطا در راه‌اندازی دیتابیس: {e}\nبرنامه بسته خواهد شد.", master=self)
+            return False
+
 if __name__ == "__main__":
     app = MainApplication()
+    
+    # قبل از تنظیم پروتکل یا شروع mainloop، دیتابیس را راه‌اندازی کن
+    if not app._initialize_database():
+        # اگر راه‌اندازی دیتابیس موفقیت آمیز نبود، برنامه را بدون خطا بستن
+        sys.exit(1) # یا app.quit() اگر نیاز به مدیریت خاص‌تر بود
+
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     app.mainloop()

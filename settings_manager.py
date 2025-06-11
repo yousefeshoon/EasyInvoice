@@ -1,8 +1,9 @@
+# settings_manager.py
 import os
 import sys
 
 from db_manager import DBManager, DATABASE_NAME, DATABASE_SCHEMA_VERSION 
-from models import AppSettings, Service 
+from models import AppSettings, Service # Service اضافه شد تا بتونیم در متد جدید ازش استفاده کنیم
 
 class SettingsManager:
     def __init__(self):
@@ -47,6 +48,24 @@ class SettingsManager:
         success = self.db_manager.execute_query(query, params) is not None
         self.db_manager.close()
         return success
+
+    # این متد برای حل مشکل ModuleNotFoundError اضافه شده بود
+    # تا invoice_generator و invoice_ui بتوانند توضیحات سرویس را بخوانند
+    # اگرچه از نظر معماری ایده آل نیست، اما در حال حاضر مشکل را حل می‌کند.
+    def get_service_description_by_id(self, service_id: int):
+        """ بازیابی توضیحات سرویس بر اساس شناسه سرویس. """
+        if not self.db_manager.connect():
+            return None
+        
+        query = "SELECT description FROM Services WHERE id = ?"
+        cursor = self.db_manager.execute_query(query, (service_id,))
+        description = None
+        if cursor:
+            row = cursor.fetchone()
+            if row:
+                description = row['description']
+        self.db_manager.close()
+        return description
 
 
 # --- بلاک تست مستقل ---
@@ -98,3 +117,22 @@ if __name__ == "__main__":
         print("Final Settings after update:", final_settings.to_dict())
     else:
         print("Could not retrieve final settings.")
+
+    # تست get_service_description_by_id
+    # این بلاک نیاز به وجود services_manager و مدل Service دارد تا بتواند تست شود
+    try:
+        from service_manager import ServiceManager # از services_manager موجود شما استفاده می‌شود
+        from models import Service
+
+        svc_man = ServiceManager()
+        # اضافه کردن یک سرویس موقت برای تست
+        svc_man.add_service(Service(service_code=999, description="خدمت تست توضیحات"))
+        all_services, _ = svc_man.get_all_services()
+        if all_services:
+            test_service_id = all_services[0].id
+            service_desc = settings_manager.get_service_description_by_id(test_service_id)
+            print(f"\nDescription for service ID {test_service_id}: {service_desc}")
+        else:
+            print("\nNo services to test get_service_description_by_id.")
+    except ImportError:
+        print("\nCould not import ServiceManager for testing get_service_description_by_id (ignore if not running this test block).")

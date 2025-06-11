@@ -1,4 +1,5 @@
 # models.py
+import json 
 
 class AppSettings:
     """ مدل داده‌ای برای تنظیمات برنامه """
@@ -33,82 +34,130 @@ class AppSettings:
 
 
 class Customer:
-    """ مدل داده‌ای برای مشتریان """
-    def __init__(self, id=None, name=None, company_name=None, address=None,
-                 phone=None, email=None, tax_id=None, registration_date=None):
+    """ مدل داده‌ای برای مشتریان (company_name حذف شد) """
+    def __init__(self, id=None, customer_code=None, name=None, customer_type=None, address=None,
+                 phone=None, phone2=None, mobile=None, email=None, tax_id=None, postal_code=None, notes=None, registration_date=None):
         self.id = id
+        self.customer_code = customer_code
         self.name = name
-        self.company_name = company_name
+        self.customer_type = customer_type
         self.address = address
         self.phone = phone
+        self.phone2 = phone2
+        self.mobile = mobile
         self.email = email
         self.tax_id = tax_id
+        self.postal_code = postal_code
+        self.notes = notes
         self.registration_date = registration_date
 
     def to_dict(self):
         return {
             "id": self.id,
+            "customer_code": self.customer_code,
             "name": self.name,
-            "company_name": self.company_name,
+            "customer_type": self.customer_type,
             "address": self.address,
             "phone": self.phone,
+            "phone2": self.phone2,
+            "mobile": self.mobile,
             "email": self.email,
             "tax_id": self.tax_id,
+            "postal_code": self.postal_code,
+            "notes": self.notes,
             "registration_date": self.registration_date
         }
 
     @classmethod
     def from_dict(cls, data):
-        return cls(**data)
+        data_copy = data.copy()
+        data_copy.pop('company_name', None) 
+        return cls(**data_copy)
 
 
 class Service:
-    """ مدل داده‌ای برای خدمات (تغییر یافته) """
-    def __init__(self, id=None, service_code=None, description=None, settlement_type=None): # --- تغییرات اینجا: service_code اضافه شد ---
+    """ مدل داده‌ای برای خدمات (settlement_type حذف شد) """
+    def __init__(self, id=None, service_code=None, description=None):
         self.id = id
-        self.service_code = service_code # --- ستون جدید ---
+        self.service_code = service_code
         self.description = description
-        self.settlement_type = settlement_type
 
     def to_dict(self):
         return {
             "id": self.id,
-            "service_code": self.service_code, # --- ستون جدید ---
-            "description": self.description,
-            "settlement_type": self.settlement_type
+            "service_code": self.service_code,
+            "description": self.description
         }
 
     @classmethod
     def from_dict(cls, data):
-        return cls(**data)
+        data_copy = data.copy()
+        data_copy.pop('settlement_type', None)
+        return cls(**data_copy)
 
 
 class Contract:
-    """ مدل داده‌ای برای قراردادها """
+    """ مدل داده‌ای برای قراردادها (ساده‌سازی فیلدها با بازگشت title و payment_method) """
     def __init__(self, id=None, customer_id=None, contract_number=None,
-                 start_date=None, end_date=None, total_amount=None, description=None):
+                 contract_date=None,  
+                 total_amount=None, description=None,
+                 title=None, # فیلد عنوان قرارداد (باقی ماند)
+                 payment_method=None, # فیلد نحوه پرداخت (باقی ماند)
+                 scanned_pages=None
+                 ):
         self.id = id
         self.customer_id = customer_id
         self.contract_number = contract_number
-        self.start_date = start_date
-        self.end_date = end_date
+        self.contract_date = contract_date 
         self.total_amount = total_amount
         self.description = description
+        self.title = title # باقی ماند
+        self.payment_method = payment_method # باقی ماند
+        
+        if isinstance(scanned_pages, str): 
+            try: 
+                self.scanned_pages = json.loads(scanned_pages) 
+            except json.JSONDecodeError: 
+                self.scanned_pages = [] 
+        else: 
+            self.scanned_pages = scanned_pages if scanned_pages is not None else [] 
+            
+        self.customer_name = None 
 
     def to_dict(self):
         return {
             "id": self.id,
             "customer_id": self.customer_id,
             "contract_number": self.contract_number,
-            "start_date": self.start_date,
-            "end_date": self.end_date,
+            "contract_date": self.contract_date, 
             "total_amount": self.total_amount,
-            "description": self.description
+            "description": self.description,
+            "title": self.title, 
+            "payment_method": self.payment_method, 
+            "scanned_pages": json.dumps(self.scanned_pages) 
         }
 
     @classmethod
     def from_dict(cls, data):
-        return cls(**data)
+        data_copy = data.copy()
+        
+        if 'scanned_pages' in data_copy and isinstance(data_copy['scanned_pages'], str): 
+            try: 
+                data_copy['scanned_pages'] = json.loads(data_copy['scanned_pages']) 
+            except json.JSONDecodeError: 
+                data_copy['scanned_pages'] = [] 
+        else: 
+            data_copy['scanned_pages'] = [] 
+            
+        data_copy.pop('customer_name', None) 
+        
+        # حذف فیلدهایی که دیگر وجود ندارند تا هنگام ساخت شیء خطا ندهد
+        data_copy.pop('start_date', None)
+        data_copy.pop('end_date', None)
+        data_copy.pop('services_provided', None)
+        data_copy.pop('fiscal_year', None)
+
+        return cls(**data_copy)
 
 
 class Invoice:
