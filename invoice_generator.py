@@ -13,27 +13,33 @@ class InvoiceGenerator:
         self.page = None
         self.y_cursor = 0 # برای مدیریت موقعیت عمودی در صفحه
 
-    def create_invoice_pdf(self, invoice_data, customer_data, invoice_items, output_path="invoice.pdf"):
+    def create_invoice_pdf(self, invoice_data, customer_data, invoice_items, output_path="invoice.pdf", invoice_template=None): # تغییر: invoice_template اضافه شد
         self.doc = fitz.open()
         self.page = self.doc.new_page(width=595, height=842) # A4 size in points
         self.y_cursor = 800 # شروع از بالای صفحه
 
         # تنظیم فونت فارسی
-        # برای نمایش درست فارسی، نیاز به یک فایل فونت فارسی (مثلاً Vazirmatn-Regular.ttf) داری
-        # فرض می‌کنیم فونت Vazirmatn-Regular.ttf در کنار فایل‌های پروژه قرار دارد
         font_path = os.path.join(os.path.dirname(__file__), "Vazirmatn-Regular.ttf")
         
-        # اگر فونت موجود نباشد، از فونت پیش‌فرض استفاده کند (ممکن است فارسی را به هم ریخته نمایش دهد)
         try:
+            # فونت 'fa' را برای استفاده در کل سند رجیستر می‌کنیم
+            # این کار باید فقط یک بار انجام شود.
             self.page.insert_font(fontname="fa", fontfile=font_path)
             self.font_name = "fa"
-        except Exception:
-            print("Warning: Vazirmatm font not found or could not be loaded. Using default font. Persian text might not render correctly.")
+        except Exception: 
+            print("Warning: Vazirmatn font not found or could not be loaded. Using default font. Persian text might not render correctly.")
             self.font_name = "helv" # Fallback to a standard font
 
+        # --- درج تصویر پس‌زمینه ---
+        if invoice_template and invoice_template.background_image_path:
+            self._draw_background_image(self.page, invoice_template.background_image_path, invoice_template.background_opacity)
 
-        # Header (عنوان صورتحساب و لوگو)
-        self._draw_header(invoice_data, customer_data)
+        # --- درج تصویر هدر ---
+        if invoice_template and invoice_template.header_image_path:
+            self._draw_header_image(self.page, invoice_template.header_image_path)
+        else:
+            # اگر عکس هدر نبود، هدر متنی پیش‌فرض را رسم کن
+            self._draw_header_text_only(invoice_data, customer_data, invoice_template)
 
         # اطلاعات فروشنده و خریدار
         self._draw_seller_customer_info(customer_data)
@@ -47,40 +53,132 @@ class InvoiceGenerator:
         # توضیحات
         self._draw_description(invoice_data)
 
-        # امضا و مهر
-        self._draw_signature_section()
+        # --- درج تصویر فوتر ---
+        if invoice_template and invoice_template.footer_image_path:
+            self._draw_footer_image(self.page, invoice_template.footer_image_path)
+        else:
+            # اگر عکس فوتر نبود، بخش امضا و مهر متنی پیش‌فرض را رسم کن
+            self._draw_signature_section()
+
 
         self.doc.save(output_path)
         self.doc.close()
         return True, output_path
 
-    # اصلاح شد: محاسبه دستی موقعیت برای تراز راست
+    # متد جدید برای درج تصویر پس‌زمینه
+    def _draw_background_image(self, page, image_path, opacity=1.0):
+        if not os.path.exists(image_path):
+            print(f"Warning: Background image not found at {image_path}")
+            return
+
+        try:
+            img_pil = Image.open(image_path)
+            # resize to page dimensions
+            img_pil = img_pil.resize((int(page.rect.width), int(page.rect.height)), Image.LANCZOS)
+
+            if opacity < 1.0:
+                # برای تنظیم شفافیت، تصویر را به RGBA تبدیل می‌کنیم و کانال آلفا را تنظیم می‌کنیم
+                if img_pil.mode != 'RGBA':
+                    img_pil = img_pil.convert('RGBA')
+                alpha = img_pil.split()[-1] # کانال آلفای موجود
+                alpha = Image.eval(alpha, lambda x: x * opacity) # اعمال شفافیت
+                img_pil.putalpha(alpha)
+
+            pix = fitz.Pixmap(img_pil.mode, img_pil.size, img_pil.tobytes())
+            page.insert_image(page.rect, pixmap=pix) # درج تصویر در کل صفحه
+
+        except Exception as e:
+            print(f"Error drawing background image {image_path}: {e}")
+
+    # متد جدید برای درج تصویر هدر
+    def _draw_header_image(self, page, image_path):
+        if not os.path.exists(image_path):
+            print(f"Warning: Header image not found at {image_path}")
+            return
+        try:
+            img_pil = Image.open(image_path)
+            # فرض می‌کنیم هدر در بالای صفحه قرار می‌گیرد.
+            # می‌توانیم ارتفاع مشخصی برای هدر در نظر بگیریم یا بر اساس Aspect Ratio تنظیم کنیم.
+            # مثلاً ارتفاع 100 نقطه
+            header_height = 100
+            header_width = int(img_pil.width * (header_height / img_pil.height))
+            
+            # اگر عرض هدر بیشتر از عرض صفحه شد، مقیاس رو بر اساس عرض تنظیم کن
+            if header_width > page.rect.width - 20: # 20pt margin
+                header_width = int(page.rect.width - 20)
+                header_height = int(img_pil.height * (header_width / img_pil.width))
+
+            img_pil = img_pil.resize((header_width, header_height), Image.LANCZOS)
+            pix = fitz.Pixmap(img_pil.mode, img_pil.size, img_pil.tobytes())
+            
+            # موقعیت هدر: 10 نقطه از بالا و وسط
+            x_pos = (page.rect.width - header_width) / 2
+            y_pos = 10
+            page.insert_image(fitz.Rect(x_pos, y_pos, x_pos + header_width, y_pos + header_height), pixmap=pix)
+            self.y_cursor = page.rect.height - (y_pos + header_height + 20) # بروزرسانی y_cursor بعد از هدر
+        except Exception as e:
+            print(f"Error drawing header image {image_path}: {e}")
+            self._draw_text_right_to_left(page, fitz.Point(page.rect.width/2, 50), "خطا در بارگذاری هدر", self.font_name, 10, color=(1,0,0), center_x=True)
+            self.y_cursor = page.rect.height - 120 # Fallback y_cursor
+
+
+    # متد جدید برای درج تصویر فوتر
+    def _draw_footer_image(self, page, image_path):
+        if not os.path.exists(image_path):
+            print(f"Warning: Footer image not found at {image_path}")
+            return
+        try:
+            img_pil = Image.open(image_path)
+            # فرض می‌کنیم فوتر در پایین صفحه قرار می‌گیرد.
+            footer_height = 100
+            footer_width = int(img_pil.width * (footer_height / img_pil.height))
+
+            if footer_width > page.rect.width - 20: # 20pt margin
+                footer_width = int(page.rect.width - 20)
+                footer_height = int(img_pil.height * (footer_width / img_pil.width))
+
+            img_pil = img_pil.resize((footer_width, footer_height), Image.LANCZOS)
+            pix = fitz.Pixmap(img_pil.mode, img_pil.size, img_pil.tobytes())
+            
+            # موقعیت فوتر: 10 نقطه از پایین و وسط
+            x_pos = (page.rect.width - footer_width) / 2
+            y_pos = page.rect.height - footer_height - 10 # 10px padding from bottom
+            page.insert_image(fitz.Rect(x_pos, y_pos, x_pos + footer_width, y_pos + footer_height), pixmap=pix)
+        except Exception as e:
+            print(f"Error drawing footer image {image_path}: {e}")
+            self._draw_text_right_to_left(page, fitz.Point(page.rect.width/2, page.rect.height - 50), "خطا در بارگذاری فوتر", self.font_name, 10, color=(1,0,0), center_x=True)
+
+
     def _draw_text_right_to_left(self, page, point, text, fontname, fontsize, color=(0, 0, 0), align_right=True, center_x=False):
         """
         این تابع متن را با قابلیت تراز راست یا مرکز (با محاسبه دستی) درج می‌کند.
         برای پشتیبانی کامل از bidi و شکست خط، ممکن است نیاز به کتابخانه‌های پیچیده‌تر باشد.
         """
-        if fontname not in page.get_fonts(): # اطمینان از اینکه فونت در صفحه موجود است
-            page.insert_font(fontname=fontname, fontfile=None) # اگر فونت از قبل بارگذاری نشده بود
-
-        # محاسبه عرض متن
-        # توجه: این متد ممکن است برای متن فارسی با فونت‌های پیچیده 100% دقیق نباشد
-        # برای دقت بالا، باید از ابزارهای رندرینگ متن قوی‌تر استفاده کرد.
-        text_width = page.get_text_length(text, fontname=fontname, fontsize=fontsize)
+        font_file_path = os.path.join(os.path.dirname(__file__), "Vazirmatn-Regular.ttf")
+        
+        # سعی می‌کنیم از متد text_length استفاده کنیم که در نسخه‌های جدیدتر PyMuPDF کار می‌کنه
+        try:
+            text_width = page.text_length(text, fontname=fontname, fontsize=fontsize)
+        except AttributeError:
+            # Fallback اگر text_length هم کار نکرد (مثلاً PyMuPDF خیلی قدیمی باشد)
+            print(f"Warning: 'text_length' not found. Using approximated text width for '{text}'. Please update PyMuPDF to a newer version.")
+            text_width = len(text) * (fontsize * 0.6) # تخمین تقریبی
 
         x, y = point.x, point.y
 
         if align_right and not center_x:
-            # برای تراز راست، x باید به اندازه عرض متن به چپ منتقل شود
             x = x - text_width
         elif center_x:
-            # برای تراز مرکز، x باید به اندازه نصف عرض متن به چپ منتقل شود
             x = x - (text_width / 2)
 
-        page.insert_text(fitz.Point(x, y), text, fontname=fontname, fontsize=fontsize, color=color)
+        # درج متن
+        if fontname == "fa" and os.path.exists(font_file_path):
+            page.insert_text(fitz.Point(x, y), text, fontname=fontname, fontsize=fontsize, color=color, fontfile=font_file_path)
+        else:
+            page.insert_text(fitz.Point(x, y), text, fontname=fontname, fontsize=fontsize, color=color)
 
 
-    def _draw_header(self, invoice_data, customer_data):
+    def _draw_header_text_only(self, invoice_data, customer_data, invoice_template): # تغییر: تابع جدید برای هدر متنی
         # Title (اکنون با center_x=True برای تراز وسط)
         self._draw_text_right_to_left(self.page, fitz.Point(self.page.rect.width / 2, self.y_cursor), "صورتحساب", self.font_name, 24, center_x=True)
         self.y_cursor -= 30
@@ -95,21 +193,26 @@ class InvoiceGenerator:
         self._draw_text_right_to_left(self.page, fitz.Point(self.page.rect.width - 50, self.y_cursor), issue_date_text, self.font_name, 12)
         self.y_cursor -= 20
 
-        # Logo (optional)
+        # Display template name if available (for debugging/info)
+        if invoice_template:
+            template_name_text = f"قالب: {invoice_template.template_name}"
+            self._draw_text_right_to_left(self.page, fitz.Point(50, self.y_cursor + 20), template_name_text, self.font_name, 10, align_right=False)
+
+        # Logo (optional - from AppSettings for textual header)
         settings = self.settings_manager.get_settings()
         logo_path = settings.seller_logo_path
         if logo_path and os.path.exists(logo_path):
             try:
-                # Resize logo to fit
-                logo_rect = fitz.Rect(50, 750, 150, 800) # x0, y0, x1, y1 (top-left, bottom-right)
+                logo_rect = fitz.Rect(50, self.y_cursor + 40, 150, self.y_cursor + 90) # Adjust position
                 pix = fitz.Pixmap(logo_path)
                 if pix.alpha:
-                    pix = fitz.Pixmap(pix, 0) # Convert to RGB if it has alpha channel
+                    pix = fitz.Pixmap(pix, 0) 
                 self.page.insert_image(logo_rect, pixmap=pix)
             except Exception as e:
-                print(f"Error inserting logo: {e}")
+                print(f"Error inserting logo with text header: {e}")
         
         self.y_cursor -= 20 # Add some space after header
+
 
     def _draw_seller_customer_info(self, customer_data):
         # Box for Seller Info
@@ -154,7 +257,6 @@ class InvoiceGenerator:
         table_x0 = 50
         table_x1 = self.page.rect.width - 50
         # ستون‌ها از راست به چپ: مبلغ کل، قیمت واحد، شرح کالا/خدمت، تعداد، ردیف
-        # col_widths = [80, 80, 200, 100, 50] 
         col_x_positions = [table_x1 - 80, # مبلغ کل (از راست 50 شروع)
                            table_x1 - 80 - 80, # قیمت واحد
                            table_x1 - 80 - 80 - 200, # شرح کالا/خدمت
@@ -222,23 +324,28 @@ class InvoiceGenerator:
             self._draw_text_right_to_left(self.page, fitz.Point(self.page.rect.width - 60, self.y_cursor), desc_text, self.font_name, 10)
             self.y_cursor -= 40
 
-    def _draw_signature_section(self):
+    def _draw_signature_section(self): # تغییر: این تابع حالا فقط برای فوتر متنی فراخوانی می‌شود
         # Placeholder for signature
         self.page.draw_line(fitz.Point(100, self.y_cursor - 50), fitz.Point(250, self.y_cursor - 50))
         self._draw_text_right_to_left(self.page, fitz.Point(175, self.y_cursor - 65), "امضا و مهر فروشنده", self.font_name, 10)
 
 # --- بلاک تست مستقل ---
 if __name__ == "__main__":
-    from models import AppSettings, Customer, Invoice, InvoiceItem, Service
+    from models import AppSettings, Customer, Invoice, InvoiceItem, Service, InvoiceTemplate # InvoiceTemplate اضافه شد
     from settings_manager import SettingsManager
     from db_manager import DBManager, DATABASE_NAME
     import sys
     from service_manager import ServiceManager 
 
     # Setup a temporary database for testing
-    current_dir_path = os.path.dirname(os.path.abspath(__file__)) 
-    temp_db_path = os.path.join(current_dir_path, DATABASE_NAME)
+    # برای جلوگیری از تداخل با دیتابیس اصلی، از یک فایل دیتابیس موقت برای تست استفاده می‌کنیم.
+    temp_db_name_for_test = "test_invoice_generator.db"
+    temp_db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), temp_db_name_for_test)
     
+    # حذف دیتابیس تستی قبلی اگر وجود دارد
+    if os.path.exists(temp_db_path):
+        os.remove(temp_db_path)
+
     # Initialize DBManager and ensure tables/migrations are run
     db_manager_test = DBManager(temp_db_path)
     if db_manager_test.connect():
@@ -259,7 +366,7 @@ if __name__ == "__main__":
         seller_phone="021-12345678",
         seller_tax_id="12345678901",
         seller_economic_code="0987654321",
-        seller_logo_path=os.path.join(current_dir_path, "test_logo.png") # Put a test_logo.png next to this file
+        seller_logo_path=os.path.join(os.path.dirname(__file__), "test_logo.png") # Put a test_logo.png next to this file
     )
     settings_manager.save_settings(dummy_settings)
 
@@ -288,6 +395,19 @@ if __name__ == "__main__":
     svc_man.add_service(dummy_service1)
     svc_man.add_service(dummy_service2)
 
+    # ایجاد یک قالب صورتحساب dummy برای تست
+    # فرض می‌کنیم فایل‌های test_header.png, test_footer.png, test_background.png در کنار همین فایل وجود دارند
+    dummy_template = InvoiceTemplate(
+        template_name="قالب استاندارد تست با عکس",
+        template_type="PDF_Standard",
+        required_fields=["invoice_number", "customer_name", "total_amount"],
+        default_settings={"tax_percentage": 9, "discount_editable": True},
+        is_active=1,
+        header_image_path=os.path.join(os.path.dirname(__file__), "test_header.png"), # مسیر نمونه
+        footer_image_path=os.path.join(os.path.dirname(__file__), "test_footer.png"), # مسیر نمونه
+        background_image_path=os.path.join(os.path.dirname(__file__), "test_background.png"), # مسیر نمونه
+        background_opacity=0.2
+    )
 
     # Create dummy invoice data
     invoice = Invoice(
@@ -315,7 +435,9 @@ if __name__ == "__main__":
 
     # Generate PDF
     invoice_gen = InvoiceGenerator(settings_manager)
-    success, pdf_path = invoice_gen.create_invoice_pdf(invoice, dummy_customer, invoice_items_list, "sample_invoice.pdf")
+    # خروجی PDF برای تست
+    test_output_pdf_path = "sample_invoice_with_images.pdf"
+    success, pdf_path = invoice_gen.create_invoice_pdf(invoice, dummy_customer, invoice_items_list, test_output_pdf_path, dummy_template) # اضافه شد: ارسال قالب
 
     if success:
         print(f"Sample invoice generated at: {pdf_path}")

@@ -4,7 +4,7 @@ import os
 import sys
 
 DATABASE_NAME = "easy_invoice.db"
-DATABASE_SCHEMA_VERSION = 12 # افزایش یافت به 12
+DATABASE_SCHEMA_VERSION = 14 # افزایش یافت به 14
 
 class DBManager:
     def __init__(self, db_path):
@@ -121,6 +121,21 @@ class DBManager:
                 total_price REAL NOT NULL,
                 FOREIGN KEY (invoice_id) REFERENCES Invoices(id) ON DELETE CASCADE,
                 FOREIGN KEY (service_id) REFERENCES Services(id)
+            );
+            """,
+            # اضافه شد: جدول InvoiceTemplates
+            """
+            CREATE TABLE IF NOT EXISTS InvoiceTemplates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_name TEXT UNIQUE NOT NULL,
+                template_type TEXT NOT NULL,
+                required_fields TEXT,       -- JSON array of required field names
+                default_settings TEXT,      -- JSON object of default values/rules
+                is_active INTEGER DEFAULT 1, -- 1 for active, 0 for inactive
+                header_image_path TEXT,     -- مسیر عکس هدر
+                footer_image_path TEXT,     -- مسیر عکس فوتر
+                background_image_path TEXT, -- مسیر عکس بک‌گراند
+                background_opacity REAL     -- شفافیت بک‌گراند (0.0 تا 1.0)
             );
             """
         ]
@@ -448,11 +463,59 @@ class DBManager:
             except sqlite3.Error as e:
                 print(f"Error migrating to version 12 (Invoices/InvoiceItems tables): {e}")
 
+        # بلاک مهاجرت جدید برای جدول InvoiceTemplates
+        if current_db_version < 13:
+            print("Migrating to version 13: Adding InvoiceTemplates table...")
+            try:
+                self.execute_query("""
+                    CREATE TABLE IF NOT EXISTS InvoiceTemplates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        template_name TEXT UNIQUE NOT NULL,
+                        template_type TEXT NOT NULL,
+                        required_fields TEXT,       -- JSON array of required field names
+                        default_settings TEXT,      -- JSON object of default values/rules
+                        is_active INTEGER DEFAULT 1, -- 1 for active, 0 for inactive
+                        notes TEXT                  -- notes فیلد قبلی (حذف خواهد شد در 14)
+                    );
+                """)
+                print("Migration to version 13 successful: InvoiceTemplates table created.")
+                self.set_db_version(13)
+            except sqlite3.Error as e:
+                print(f"Error migrating to version 13 (InvoiceTemplates table): {e}")
+
+        # بلاک مهاجرت جدید برای اضافه کردن فیلدهای عکس به InvoiceTemplates و حذف notes
+        if current_db_version < 14:
+            print("Migrating to version 14: Adding image paths and opacity to InvoiceTemplates, removing notes...")
+            try:
+                self.execute_query("""
+                    CREATE TABLE InvoiceTemplates_temp (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        template_name TEXT UNIQUE NOT NULL,
+                        template_type TEXT NOT NULL,
+                        required_fields TEXT,
+                        default_settings TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        header_image_path TEXT,
+                        footer_image_path TEXT,
+                        background_image_path TEXT,
+                        background_opacity REAL
+                    );
+                """)
+                self.execute_query("""
+                    INSERT INTO InvoiceTemplates_temp (id, template_name, template_type, required_fields, default_settings, is_active, header_image_path, footer_image_path, background_image_path, background_opacity)
+                    SELECT id, template_name, template_type, required_fields, default_settings, is_active, '', '', '', 1.0
+                    FROM InvoiceTemplates;
+                """) # با مقادیر پیش فرض برای مسیرهای عکس و شفافیت
+                self.execute_query("DROP TABLE InvoiceTemplates;")
+                self.execute_query("ALTER TABLE InvoiceTemplates_temp RENAME TO InvoiceTemplates;")
+                print("Migration to version 14 successful.")
+                self.set_db_version(14)
+            except sqlite3.Error as e:
+                print(f"Error migrating to version 14 (InvoiceTemplates schema change for images): {e}")
+
 
         if current_db_version < DATABASE_SCHEMA_VERSION:
             print(f"Performing database migration from {current_db_version} to {DATABASE_SCHEMA_VERSION}...")
-            # این خط در حالت عادی باید متدهای migrate_database را فراخوانی کند
-            # اما چون این تابع خودش مدیریت مهاجرت را انجام می‌دهد، صرفا نسخه را به‌روز می‌کند
             self.set_db_version(DATABASE_SCHEMA_VERSION)
             print(f"Database migrated to version {DATABASE_SCHEMA_VERSION}.")
         elif current_db_version > DATABASE_SCHEMA_VERSION:

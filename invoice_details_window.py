@@ -2,22 +2,24 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, ttk
 import os
+import json # برای serializing/deserializing لیست scanned_pages
 import jdatetime
-import sys
-import subprocess
+from PIL import Image, ImageTk 
+import fitz # (PyMuPDF) برای کار با PDF
+import subprocess # برای باز کردن فایل‌ها
 
 from db_manager import DBManager # فقط برای تست مستقل لازم است
 from customer_manager import CustomerManager # برای خواندن اطلاعات مشتری
 from service_manager import ServiceManager # برای خواندن اطلاعات سرویس
 from settings_manager import SettingsManager # برای خواندن تنظیمات فروشنده
 from contract_manager import ContractManager # برای خواندن اطلاعات قرارداد
-from models import Invoice, InvoiceItem, Customer, Service, Contract
+from models import Invoice, InvoiceItem, Customer, Service, Contract, InvoiceTemplate # InvoiceTemplate اضافه شد
 from invoice_generator import InvoiceGenerator
 from invoice_manager import InvoiceManager # اضافه شده: برای ذخیره در دیتابیس
 
 class InvoiceDetailsWindow(ctk.CTkToplevel):
     def __init__(self, master, db_manager, ui_colors, base_font, heading_font, button_font,
-                 selected_contract: Contract, selected_invoice_format: str):
+                 selected_contract: Contract, selected_invoice_template: InvoiceTemplate):
         super().__init__(master)
         self.title("جزئیات صورتحساب")
         self.db_manager = db_manager
@@ -34,7 +36,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         self.invoice_manager = InvoiceManager() # اضافه شده: برای ذخیره در دیتابیس
 
         self.selected_contract = selected_contract
-        self.selected_invoice_format = selected_invoice_format
+        self.selected_invoice_template = selected_invoice_template 
 
         self.transient(master) # پنجره روی پنجره اصلی باشد
         self.grab_set() # تا وقتی باز است، کاربر نتواند با پنجره اصلی کار کند
@@ -62,8 +64,8 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         self.due_date_var = ctk.StringVar(value="----/--/--") # Optional due date
         self.customer_name_var = ctk.StringVar(value=self.selected_contract.customer_name if self.selected_contract.customer_name else "") # نام مشتری از قرارداد
         self.description_textbox = None
-        self.discount_percentage_var = ctk.StringVar(value="0")
-        self.tax_percentage_var = ctk.StringVar(value="9") # Default VAT
+        self.discount_percentage_var = ctk.StringVar(value="0") # مقدار پیش‌فرض "0" نه ""
+        self.tax_percentage_var = ctk.StringVar(value="9") # Default VAT (now from template)
         self.total_amount_var = ctk.StringVar(value="0") # Sum of items
         self.final_amount_var = ctk.StringVar(value="0") # total - discount + tax
 
@@ -71,14 +73,15 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         self.invoice_items_tree = None
         self.invoice_items_list = [] # List of InvoiceItem objects in UI
         self.current_item_service_var = ctk.StringVar()
-        self.current_item_quantity_var = ctk.StringVar()
-        self.current_item_unit_price_var = ctk.StringVar()
-        self.current_item_total_price_var = ctk.StringVar(value="0")
+        self.current_item_quantity_var = ctk.StringVar(value="0") # مقدار پیش‌فرض "0"
+        self.current_item_unit_price_var = ctk.StringVar(value="0") # مقدار پیش‌فرض "0"
+        self.current_item_total_price_var = ctk.StringVar(value="0") # مقدار پیش‌فرض "0"
 
         self.customer_obj = None # برای نگهداری آبجکت مشتری
 
         self.create_widgets()
         self.load_initial_data()
+        self.apply_template_settings() # اضافه شد: اعمال تنظیمات قالب
         self.clear_invoice_form() # برای مقداردهی اولیه فیلدها و اطمینان از پاک بودن
 
     def create_widgets(self):
@@ -124,9 +127,9 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(info_frame, text="قرارداد مربوطه:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=3, padx=5, pady=5, sticky="e")
         ctk.CTkLabel(info_frame, text=f"{self.selected_contract.contract_number} - {self.selected_contract.title}", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=2, padx=5, pady=5, sticky="ew")
 
-        # Invoice Format (read-only)
-        ctk.CTkLabel(info_frame, text="فرمت صورتحساب:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=5, pady=5, sticky="e")
-        ctk.CTkLabel(info_frame, text=self.selected_invoice_format, font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=0, padx=5, pady=5, sticky="ew")
+        # Invoice Template (read-only)
+        ctk.CTkLabel(info_frame, text="قالب صورتحساب:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=5, pady=5, sticky="e")
+        ctk.CTkLabel(info_frame, text=self.selected_invoice_template.template_name, font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=0, padx=5, pady=5, sticky="ew")
 
         row_idx += 1
 
@@ -254,9 +257,39 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
             self.description_textbox.insert("1.0", self.selected_contract.description)
         
         # Set total amount from contract as initial suggestion
-        if self.selected_contract.total_amount:
+        if self.selected_contract.total_amount is not None: # بررسی برای None بودن
             self.total_amount_var.set(f"{int(self.selected_contract.total_amount):,}")
             self.calculate_final_amount()
+
+    def apply_template_settings(self):
+        """ اعمال تنظیمات پیش‌فرض و قوانین قالب انتخاب شده به فرم صورتحساب. """
+        if self.selected_invoice_template and self.selected_invoice_template.default_settings:
+            default_settings = self.selected_invoice_template.default_settings
+
+            # اعمال درصد مالیات
+            if "tax_percentage" in default_settings:
+                try:
+                    tax_percent_val = default_settings["tax_percentage"]
+                    self.tax_percentage_var.set(str(tax_percent_val) if tax_percent_val is not None else "9") # اطمینان از رشته بودن
+                except ValueError:
+                    pass # Invalid tax percentage in template
+
+            # اعمال درصد تخفیف (اگر قابل ویرایش نیست، غیرفعال شود)
+            if "discount_percentage" in default_settings:
+                try:
+                    discount_percent_val = default_settings["discount_percentage"]
+                    self.discount_percentage_var.set(str(discount_percent_val) if discount_percent_val is not None else "0") # اطمینان از رشته بودن
+                except ValueError:
+                    pass
+
+            if "discount_editable" in default_settings and not default_settings["discount_editable"]:
+                self.discount_percentage_var.set("0") # اگر قابل ویرایش نیست، صفر شود
+                # TODO: اینجا باید Entry مربوط به تخفیف را غیرفعال کنیم، اما فعلاً مستقیم به Entry دسترسی نداریم
+            
+            self.calculate_final_amount() # محاسبه مجدد پس از اعمال تنظیمات قالب
+
+        # TODO: پیاده‌سازی منطق نمایش/پنهان کردن فیلدها بر اساس self.selected_invoice_template.required_fields
+
 
     def on_service_selected(self, choice):
         # Populate unit price if a service has a default price (not implemented yet)
@@ -264,9 +297,11 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
 
     def calculate_item_total(self, event=None):
         try:
-            quantity = float(self.quantity_entry.get().replace(",", "") or 0)
+            quantity_str = self.quantity_entry.get().replace(",", "")
+            quantity = float(quantity_str) if quantity_str else 0.0 # اگر خالی بود، 0.0 در نظر بگیر
+
             unit_price_str = self.unit_price_entry.get().replace(",", "")
-            unit_price = float(unit_price_str or 0)
+            unit_price = float(unit_price_str) if unit_price_str else 0.0 # اگر خالی بود، 0.0 در نظر بگیر
             
             total = quantity * unit_price
             self.current_item_total_price_var.set(f"{int(total):,}")
@@ -295,7 +330,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
     def add_or_update_invoice_item(self):
         service_description = self.current_item_service_var.get()
         quantity_str = self.current_item_quantity_var.get().replace(",", "")
-        unit_price_str = self.unit_price_entry.get().replace(",", "")
+        unit_price_str = self.current_item_unit_price_var.get().replace(",", "")
 
         if not service_description or not quantity_str or not unit_price_str:
             messagebox.showwarning("خطای ورودی", "لطفاً خدمت/کالا، تعداد و قیمت واحد را پر کنید.", master=self)
@@ -354,8 +389,8 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
 
     def clear_item_fields(self):
         self.current_item_service_var.set(self.service_dropdown.cget("values")[0] if self.service_dropdown.cget("values") else "")
-        self.current_item_quantity_var.set("")
-        self.current_item_unit_price_var.set("")
+        self.current_item_quantity_var.set("0") # مقدار پیش‌فرض "0"
+        self.current_item_unit_price_var.set("0") # مقدار پیش‌فرض "0"
         self.current_item_total_price_var.set("0")
         self.invoice_items_tree.selection_remove(self.invoice_items_tree.focus()) # Deselect current item
 
@@ -373,8 +408,11 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         self.total_amount_var.set(f"{int(total_items_amount):,}")
 
         try:
-            discount_percent = float(self.discount_percentage_var.get().replace(",", "") or 0)
-            tax_percent = float(self.tax_percentage_var.get().replace(",", "") or 0)
+            discount_percent_str = self.discount_percentage_var.get().replace(",", "")
+            discount_percent = float(discount_percent_str) if discount_percent_str else 0.0 # اگر خالی بود، 0.0 در نظر بگیر
+            
+            tax_percent_str = self.tax_percentage_var.get().replace(",", "")
+            tax_percent = float(tax_percent_str) if tax_percent_str else 0.0 # اگر خالی بود، 0.0 در نظر بگیر
         except ValueError:
             messagebox.showwarning("خطای ورودی", "درصد تخفیف و مالیات باید اعداد باشند.", master=self)
             self.final_amount_var.set("0")
@@ -398,8 +436,9 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         if self.selected_contract and self.selected_contract.description:
             self.description_textbox.insert("1.0", self.selected_contract.description)
 
-        self.discount_percentage_var.set("0")
-        self.tax_percentage_var.set("9")
+        # از template_settings برای مقادیر پیش فرض استفاده کن
+        self.apply_template_settings() 
+        
         self.invoice_items_list = []
         self.update_invoice_items_treeview()
         self.clear_item_fields()
@@ -426,6 +465,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         issue_date = self.issue_date_var.get().strip()
         due_date = self.due_date_var.get().strip() if self.due_date_var.get().strip() != "----/--/--" else None
         description = self.description_textbox.get("1.0", "end").strip()
+        
         discount_percent_str = self.discount_percentage_var.get().replace(",", "")
         tax_percent_str = self.tax_percentage_var.get().replace(",", "")
         final_amount_str = self.final_amount_var.get().replace(",", "")
@@ -458,10 +498,11 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
             return None, None
 
         try:
-            discount_percentage = float(discount_percent_str)
-            tax_percentage = float(tax_percent_str)
-            total_amount = float(total_amount_str)
-            final_amount = float(final_amount_str)
+            # اطمینان از تبدیل ایمن به float
+            discount_percentage = float(discount_percent_str) if discount_percent_str else 0.0
+            tax_percentage = float(tax_percent_str) if tax_percent_str else 0.0
+            total_amount = float(total_amount_str) if total_amount_str else 0.0
+            final_amount = float(final_amount_str) if final_amount_str else 0.0
         except ValueError:
             messagebox.showwarning("خطای ورودی", "مبالغ و درصدها باید اعداد معتبر باشند.", master=self)
             return None, None
@@ -489,7 +530,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
 
         # Generate PDF
         temp_pdf_path = os.path.join(os.getcwd(), "temp_invoice_preview.pdf")
-        success, _ = self.invoice_generator.create_invoice_pdf(invoice, customer, self.invoice_items_list, temp_pdf_path)
+        success, _ = self.invoice_generator.create_invoice_pdf(invoice, customer, self.invoice_items_list, temp_pdf_path, self.selected_invoice_template) # اضافه شد: ارسال قالب
 
         if success:
             try:
@@ -521,7 +562,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         pdf_filename = f"Invoice_{invoice.invoice_number}_{invoice.issue_date.replace('/', '-')}.pdf"
         full_pdf_path = os.path.join(output_dir, pdf_filename)
 
-        generate_success, _ = self.invoice_generator.create_invoice_pdf(invoice, customer, self.invoice_items_list, full_pdf_path)
+        generate_success, _ = self.invoice_generator.create_invoice_pdf(invoice, customer, self.invoice_items_list, full_pdf_path, self.selected_invoice_template) # اضافه شد: ارسال قالب
 
         if generate_success:
             messagebox.showinfo("موفقیت", f"صورتحساب با موفقیت در مسیر\n{full_pdf_path}\nذخیره و به پرینتر ارسال شد.", master=self)

@@ -3,10 +3,12 @@ import customtkinter as ctk
 from tkinter import messagebox
 import os
 import jdatetime
+import json # اضافه شد برای خواندن JSON از قالب
 
 from contract_manager import ContractManager
 from invoice_details_window import InvoiceDetailsWindow # پنجره جزئیات
-from models import Contract # برای Type Hinting
+from models import Contract, InvoiceTemplate # InvoiceTemplate اضافه شد
+from invoice_template_manager import InvoiceTemplateManager # اضافه شد
 
 class InvoiceMainUI(ctk.CTkFrame):
     def __init__(self, parent, db_manager, ui_colors, base_font, heading_font, button_font, nav_button_font):
@@ -20,13 +22,17 @@ class InvoiceMainUI(ctk.CTkFrame):
         self.nav_button_font = nav_button_font
 
         self.contract_manager = ContractManager()
+        self.invoice_template_manager = InvoiceTemplateManager() # اضافه شد
 
         self.selected_contract_var = ctk.StringVar()
-        self.selected_format_var = ctk.StringVar(value="قالب استاندارد خدمات") # پیش‌فرض
+        self.selected_template_var = ctk.StringVar() # تغییر: از selected_format_var به selected_template_var
         self.contract_data_map = {} # Map contract_number to Contract object
+        self.template_data_map = {} # Map template_name to InvoiceTemplate object
+        self.current_selected_template = None # برای نگهداری آبجکت قالب انتخاب شده
 
         self.create_widgets()
         self.load_contracts_to_dropdown()
+        self.load_templates_to_dropdown() # اضافه شد
 
     def create_widgets(self):
         main_frame = ctk.CTkFrame(self, fg_color="white", corner_radius=10,
@@ -49,17 +55,18 @@ class InvoiceMainUI(ctk.CTkFrame):
                                                  command=self.on_contract_selected)
         self.contract_dropdown.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
 
-        # --- Section 2: Invoice Format Selection ---
-        format_selection_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        format_selection_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        format_selection_frame.grid_columnconfigure(0, weight=1)
-        format_selection_frame.grid_columnconfigure(1, weight=0)
+        # --- Section 2: Invoice Template Selection ---
+        template_selection_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        template_selection_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        template_selection_frame.grid_columnconfigure(0, weight=1)
+        template_selection_frame.grid_columnconfigure(1, weight=0)
 
-        ctk.CTkLabel(format_selection_frame, text="انتخاب فرمت صورتحساب:", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=0, column=1, padx=10, pady=5, sticky="e")
-        self.format_dropdown = ctk.CTkComboBox(format_selection_frame, values=["قالب استاندارد خدمات", "قالب رسمی مالیاتی"], # می‌توانید فرمت‌های دیگر را اضافه کنید
-                                               variable=self.selected_format_var,
-                                               font=self.base_font, justify="right", width=300)
-        self.format_dropdown.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(template_selection_frame, text="انتخاب قالب صورتحساب:", font=self.heading_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=0, column=1, padx=10, pady=5, sticky="e")
+        self.template_dropdown = ctk.CTkComboBox(template_selection_frame, values=[], # مقادیر داینامیک از دیتابیس
+                                               variable=self.selected_template_var,
+                                               font=self.base_font, justify="right", width=300,
+                                               command=self.on_template_selected) # اضافه شد
+        self.template_dropdown.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
         
         # --- Create Invoice Button ---
         create_invoice_btn = ctk.CTkButton(main_frame, text="ساخت صورتحساب",
@@ -88,21 +95,54 @@ class InvoiceMainUI(ctk.CTkFrame):
             self.selected_contract_var.set("قراردادی یافت نشد")
             self.contract_dropdown.configure(state="disabled")
 
+    def load_templates_to_dropdown(self):
+        """ بارگذاری قالب‌های صورتحساب فعال از دیتابیس به دراپ‌داون """
+        templates, _ = self.invoice_template_manager.get_all_templates(active_only=True)
+        templates.sort(key=lambda t: t.template_name)
+        
+        template_names = []
+        self.template_data_map = {}
+        for template in templates:
+            template_names.append(template.template_name)
+            self.template_data_map[template.template_name] = template
+        
+        self.template_dropdown.configure(values=template_names)
+        if template_names:
+            self.selected_template_var.set(template_names[0])
+            self.on_template_selected(template_names[0]) # فراخوانی برای بارگذاری تنظیمات اولیه
+        else:
+            self.selected_template_var.set("قالبی یافت نشد")
+            self.template_dropdown.configure(state="disabled")
+            self.current_selected_template = None
+
+
     def on_contract_selected(self, choice):
         # این تابع وقتی یک قرارداد از دراپ‌داون انتخاب میشه، فراخوانی میشه
         pass
 
+    def on_template_selected(self, choice):
+        """ وقتی یک قالب از دراپ‌داون انتخاب می‌شود، آبجکت آن را ذخیره می‌کند. """
+        self.current_selected_template = self.template_data_map.get(choice)
+        if not self.current_selected_template:
+            messagebox.showwarning("خطا", "قالب انتخاب شده نامعتبر است.", master=self)
+            self.selected_template_var.set("قالبی یافت نشد") # ریست کردن دراپ‌داون
+            self.current_selected_template = None
+
+
     def open_invoice_details_window(self):
         selected_contract_display_text = self.selected_contract_var.get()
         selected_contract: Contract = self.contract_data_map.get(selected_contract_display_text)
-        selected_format = self.selected_format_var.get()
-
+        
         if not selected_contract:
             messagebox.showwarning("خطا", "لطفاً یک قرارداد را انتخاب کنید.", master=self)
             return
+        
+        if not self.current_selected_template:
+            messagebox.showwarning("خطا", "لطفاً یک قالب صورتحساب را انتخاب کنید.", master=self)
+            return
 
         # باز کردن پنجره جدید
-        # تغییر در این خط:
+        # master for Toplevel should be the main app instance (self.master.master)
         invoice_details_win = InvoiceDetailsWindow(
             master=self.master.master, 
             db_manager=self.db_manager,
@@ -111,7 +151,7 @@ class InvoiceMainUI(ctk.CTkFrame):
             heading_font=self.heading_font,
             button_font=self.button_font,
             selected_contract=selected_contract,
-            selected_invoice_format=selected_format
+            selected_invoice_template=self.current_selected_template # تغییر: ارسال آبجکت قالب
         )
         invoice_details_win.grab_set() 
         self.master.master.wait_window(invoice_details_win) 

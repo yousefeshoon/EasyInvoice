@@ -94,8 +94,9 @@ class InvoiceManager:
         if cursor:
             for row in cursor.fetchall():
                 invoice_data = dict(row)
+                customer_name = invoice_data.pop('customer_name') # تغییر: customer_name را حذف کرده و ذخیره کن
                 invoice_obj = Invoice.from_dict(invoice_data)
-                invoice_obj.customer_name = invoice_data['customer_name'] # اضافه کردن نام مشتری
+                invoice_obj.customer_name = customer_name # تغییر: customer_name را به آبجکت اضافه کن
                 invoices.append(invoice_obj)
         self.db_manager.close()
         return invoices, "صورتحساب‌ها با موفقیت بازیابی شدند."
@@ -120,8 +121,9 @@ class InvoiceManager:
             row = cursor.fetchone()
             if row:
                 invoice_data = dict(row)
+                customer_name = invoice_data.pop('customer_name') # تغییر: customer_name را حذف کرده و ذخیره کن
                 invoice = Invoice.from_dict(invoice_data)
-                invoice.customer_name = invoice_data['customer_name']
+                invoice.customer_name = customer_name # تغییر: customer_name را به آبجکت اضافه کن
         self.db_manager.close()
         return invoice, "صورتحساب با موفقیت بازیابی شد."
 

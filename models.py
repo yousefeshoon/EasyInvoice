@@ -176,6 +176,7 @@ class Invoice:
         self.tax_percentage = tax_percentage
         self.final_amount = final_amount
         self.description = description
+        self.customer_name = None # اضافه شد برای نمایش در لیست UI
 
     def to_dict(self):
         return {
@@ -221,3 +222,68 @@ class InvoiceItem:
     @classmethod
     def from_dict(cls, data):
         return cls(**data)
+
+
+# اضافه شد: مدل InvoiceTemplate
+class InvoiceTemplate:
+    """ مدل داده‌ای برای قالب‌های صورتحساب """
+    def __init__(self, id=None, template_name=None, template_type=None, 
+                 required_fields=None, default_settings=None, is_active=1, 
+                 header_image_path=None, footer_image_path=None, 
+                 background_image_path=None, background_opacity=1.0): # تغییرات جدید
+        self.id = id
+        self.template_name = template_name
+        self.template_type = template_type
+        
+        # هندل کردن فیلدهای JSON
+        if isinstance(required_fields, str):
+            try:
+                self.required_fields = json.loads(required_fields)
+            except json.JSONDecodeError:
+                self.required_fields = []
+        else:
+            self.required_fields = required_fields if required_fields is not None else []
+            
+        if isinstance(default_settings, str):
+            try:
+                self.default_settings = json.loads(default_settings)
+            except json.JSONDecodeError:
+                self.default_settings = {}
+        else:
+            self.default_settings = default_settings if default_settings is not None else {}
+            
+        self.is_active = is_active
+        # self.notes = notes # حذف شد
+        self.header_image_path = header_image_path
+        self.footer_image_path = footer_image_path
+        self.background_image_path = background_image_path
+        self.background_opacity = background_opacity
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "template_name": self.template_name,
+            "template_type": self.template_type,
+            "required_fields": json.dumps(self.required_fields),
+            "default_settings": json.dumps(self.default_settings),
+            "is_active": self.is_active,
+            # "notes": self.notes, # حذف شد
+            "header_image_path": self.header_image_path,
+            "footer_image_path": self.footer_image_path,
+            "background_image_path": self.background_image_path,
+            "background_opacity": self.background_opacity
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        # مطمئن شوید که فیلدهای JSON به درستی از رشته به دیکشنری/لیست تبدیل می‌شوند
+        data_copy = data.copy()
+        if 'required_fields' in data_copy and isinstance(data_copy['required_fields'], str):
+            data_copy['required_fields'] = json.loads(data_copy['required_fields'])
+        if 'default_settings' in data_copy and isinstance(data_copy['default_settings'], str):
+            data_copy['default_settings'] = json.loads(data_copy['default_settings'])
+        
+        # حذف فیلد notes اگر هنوز در دیتابیس وجود داشت
+        data_copy.pop('notes', None)
+
+        return cls(**data_copy)
