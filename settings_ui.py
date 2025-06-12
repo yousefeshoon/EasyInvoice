@@ -2,14 +2,17 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, ttk
 import os
-from PIL import Image # فقط Image از PIL وارد می‌شود
-import json 
+from PIL import Image, ImageTk # ImageTk اضافه شد
+import json
+from bs4 import BeautifulSoup # اضافه شد
+import re # اضافه شد
+from collections import defaultdict # اضافه شد
 
 from settings_manager import SettingsManager
 from service_manager import ServiceManager
-from models import AppSettings, Service, InvoiceTemplate 
+from models import AppSettings, Service, InvoiceTemplate
 from db_manager import DBManager, DATABASE_NAME
-from invoice_template_manager import InvoiceTemplateManager 
+from invoice_template_manager import InvoiceTemplateManager
 
 class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
     def __init__(self, master, template: InvoiceTemplate, ui_colors, base_font, heading_font):
@@ -22,145 +25,161 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
 
-        a4_width_px = 794 // 1.5 
-        a4_height_px = 1123 // 1.5
+        a4_width_pt = 595 # A4 width in points
+        a4_height_pt = 842 # A4 height in points
 
-        self.geometry(f"{int(a4_width_px)}x{int(a4_height_px)}")
+        # Use A4 dimensions for window size, scaled down for preview
+        window_width = int(a4_width_pt * 0.8) # Scale down for preview window
+        window_height = int(a4_height_pt * 0.8)
+        self.geometry(f"{window_width}x{window_height}")
         self.resizable(False, False)
 
         # فریم اصلی برای سازماندهی عناصر
         main_container_frame = ctk.CTkFrame(self, fg_color="white", corner_radius=0)
         main_container_frame.pack(fill="both", expand=True)
-        main_container_frame.grid_rowconfigure(0, weight=0) # هدر
-        main_container_frame.grid_rowconfigure(1, weight=1) # کانتنت (canvas)
-        main_container_frame.grid_rowconfigure(2, weight=0) # فوتر
+        main_container_frame.grid_rowconfigure(0, weight=1) # Canvas for content
         main_container_frame.grid_columnconfigure(0, weight=1)
 
-        # لیبل برای هدر (برای نمایش عکس هدر)
-        self.header_label = ctk.CTkLabel(main_container_frame, text="", fg_color="transparent")
-        self.header_label.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-
-        # Canvas برای تصویر پس‌زمینه و متن اصلی
+        # Canvas for drawing preview content
         self.canvas = ctk.CTkCanvas(main_container_frame, bg="white", highlightthickness=1, highlightbackground=self.ui_colors["border_gray"])
-        self.canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=0) # pady=0 چون هدر و فوتر جدا شدن
+        self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        
+        # Store references for images used on canvas
+        self.canvas_image_refs = [] 
 
-        # لیبل برای فوتر (برای نمایش عکس فوتر)
-        self.footer_label = ctk.CTkLabel(main_container_frame, text="", fg_color="transparent")
-        self.footer_label.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
-
-        # متغیرهایی برای نگهداری ارجاع به تصاویر CTkImage
-        self.header_ctk_image = None
-        self.footer_ctk_image = None
-        self.bg_ctk_image = None #
-
-        self.after(10, self.draw_preview) 
+        self.after(50, self.draw_preview) # Small delay to ensure canvas dimensions are updated
 
         close_btn = ctk.CTkButton(self, text="بستن", command=self.destroy,
                                   font=self.base_font, fg_color="#999999", hover_color="#777777")
         close_btn.pack(pady=5)
 
     def draw_preview(self):
-        # پاک کردن محتوای Canvas (متن)
         self.canvas.delete("all")
+        self.canvas_image_refs = [] # Clear image references
 
-        # ابعاد Canvas
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
 
-        # اگر پنجره هنوز به طور کامل رندر نشده یا بسته شده، دوباره تلاش کن
-        if canvas_width == 1 or canvas_height == 1 or not self.winfo_exists():
-            self.after(100, self.draw_preview)
+        if canvas_width <= 1 or canvas_height <= 1 or not self.winfo_exists():
+            self.after(50, self.draw_preview)
             return
         
-        # --- Draw Background Image on Canvas (فعلا غیرفعال شد) ---
-        # bg_image_path = self.template.background_image_path
-        # if bg_image_path and os.path.exists(bg_image_path):
-        #     try:
-        #         bg_pil_image = Image.open(bg_image_path) 
-        #         bg_pil_image = bg_pil_image.resize((canvas_width, canvas_height), Image.LANCZOS)
-                
-        #         if self.template.background_opacity < 1.0:
-        #             if bg_pil_image.mode != 'RGBA':
-        #                 bg_pil_image = bg_pil_image.convert('RGBA')
-        #             alpha = bg_pil_image.split()[3] 
-        #             alpha = Image.eval(alpha, lambda x: x * self.template.background_opacity) 
-        #             bg_pil_image.putalpha(alpha) 
-                        
-        #         self.bg_ctk_image = ctk.CTkImage(light_image=bg_pil_image, dark_image=bg_pil_image, size=bg_pil_image.size)
-        #         self.canvas.create_image(canvas_width/2, canvas_height/2, image=self.bg_ctk_image)
-        #     except Exception as e:
-        #         print(f"Error loading background image for preview: {e}")
-        #         self.canvas.create_text(canvas_width/2, canvas_height/2, text="خطا در بارگذاری بک‌گراند", font=self.base_font, fill="red")
-        # else: 
-        #      self.canvas.create_text(canvas_width/2, canvas_height/2, text="(تصویر پس‌زمینه اینجا قرار می‌گیرد)", font=self.base_font, fill=self.ui_colors["text_medium_gray"])
+        # Assuming A4 dimensions in points for scaling
+        a4_width_pt = 595
+        a4_height_pt = 842
 
-        # --- Display Placeholder Text on Canvas (middle content) ---
-        self.canvas.create_text(canvas_width/2, canvas_height/2, text="متن صورتحساب در اینجا نمایش داده می‌شود", font=self.heading_font, fill=self.ui_colors["text_medium_gray"])
-
-
-        # --- Load and Display Header Image on header_label ---
-        header_image_path = self.template.header_image_path
-        if header_image_path and os.path.exists(header_image_path):
+        # Scale factor from A4 points to canvas pixels
+        scale_x = canvas_width / a4_width_pt
+        scale_y = canvas_height / a4_height_pt
+        
+        # Draw background image if available
+        if self.template.background_image_path and os.path.exists(self.template.background_image_path):
             try:
-                header_pil_image = Image.open(header_image_path)
-                # ابعاد تقریبی برای هدر لیبل
-                header_label_width = self.header_label.winfo_width() if self.header_label.winfo_width() > 1 else int(self.winfo_width() * 0.9)
-                header_label_height = 80 # ارتفاع ثابت یا تقریبی برای هدر
+                bg_pil_image = Image.open(self.template.background_image_path) 
                 
-                # حفظ نسبت تصویر
-                aspect_ratio = header_pil_image.width / header_pil_image.height
-                if header_label_width / aspect_ratio > header_label_height:
-                    new_height = header_label_height
-                    new_width = int(new_height * aspect_ratio)
-                else:
-                    new_width = header_label_width
-                    new_height = int(new_width / aspect_ratio)
+                # Resize to fit canvas
+                bg_pil_image = bg_pil_image.resize((int(canvas_width), int(canvas_height)), Image.LANCZOS)
+                
+                if self.template.background_opacity < 1.0:
+                    if bg_pil_image.mode != 'RGBA':
+                        bg_pil_image = bg_pil_image.convert('RGBA')
+                    alpha = bg_pil_image.split()[3] 
+                    alpha = Image.eval(alpha, lambda x: x * self.template.background_opacity) 
+                    bg_pil_image.putalpha(alpha) 
+                        
+                # Use ImageTk.PhotoImage for Tkinter Canvas
+                bg_tk_image = ImageTk.PhotoImage(bg_pil_image)
+                self.canvas_image_refs.append(bg_tk_image) # Keep reference
+                self.canvas.create_image(canvas_width/2, canvas_height/2, image=bg_tk_image)
+            except Exception as e:
+                print(f"Error loading background image for preview: {e}")
+                self.canvas.create_text(canvas_width/2, canvas_height/2, text="خطا در بارگذاری بک‌گراند", font=self.base_font, fill="red")
+        
+        # Draw header image if available
+        if self.template.header_image_path and os.path.exists(self.template.header_image_path):
+            try:
+                header_pil_image = Image.open(self.template.header_image_path)
+                
+                # Resize to fit a reasonable height and maintain aspect ratio
+                target_height = 80 * scale_y # A proportional height
+                ratio = header_pil_image.width / header_pil_image.height
+                new_width = int(target_height * ratio)
+                
+                header_pil_image = header_pil_image.resize((new_width, int(target_height)), Image.LANCZOS)
+                header_tk_image = ImageTk.PhotoImage(header_pil_image) # Use ImageTk.PhotoImage
+                self.canvas_image_refs.append(header_tk_image) # Keep reference
+                
+                # Position at top center, with some padding
+                x_pos = (canvas_width - new_width) / 2
+                y_pos = 10 * scale_y # small padding from top
+                self.canvas.create_image(x_pos + new_width/2, y_pos + target_height/2, image=header_tk_image)
 
-                if new_width == 0 or new_height == 0:
-                    new_width = 100
-                    new_height = 50
-
-                header_pil_image = header_pil_image.resize((new_width, new_height), Image.LANCZOS)
-                self.header_ctk_image = ctk.CTkImage(light_image=header_pil_image, dark_image=header_pil_image, size=(new_width, new_height))
-                self.header_label.configure(image=self.header_ctk_image, text="")
-                # برای تراز وسط، Label خودش این کار رو انجام میده
             except Exception as e:
                 print(f"Error loading header image for preview: {e}")
-                self.header_label.configure(text="خطا در بارگذاری هدر", image=None, text_color="red", font=self.base_font)
-        else: 
-             self.header_label.configure(text="(لوگوی سربرگ اینجا قرار می‌گیرد)", image=None, text_color=self.ui_colors["text_medium_gray"], font=self.base_font)
-
-
-        # --- Load and Display Footer Image on footer_label ---
-        footer_image_path = self.template.footer_image_path
-        if footer_image_path and os.path.exists(footer_image_path):
+                self.canvas.create_text(canvas_width/2, 30 * scale_y, text="خطا در بارگذاری هدر", font=self.base_font, fill="red")
+        
+        # Draw footer image if available
+        if self.template.footer_image_path and os.path.exists(self.template.footer_image_path):
             try:
-                footer_pil_image = Image.open(footer_image_path)
-                # ابعاد تقریبی برای فوتر لیبل
-                footer_label_width = self.footer_label.winfo_width() if self.footer_label.winfo_width() > 1 else int(self.winfo_width() * 0.9)
-                footer_label_height = 80 # ارتفاع ثابت یا تقریبی برای فوتر
+                footer_pil_image = Image.open(self.template.footer_image_path)
+                
+                # Resize to fit a reasonable height and maintain aspect ratio
+                target_height = 80 * scale_y # A proportional height
+                ratio = footer_pil_image.width / footer_pil_image.height
+                new_width = int(target_height * ratio)
+                
+                footer_pil_image = footer_pil_image.resize((new_width, int(target_height)), Image.LANCZOS)
+                footer_tk_image = ImageTk.PhotoImage(footer_pil_image) # Use ImageTk.PhotoImage
+                self.canvas_image_refs.append(footer_tk_image) # Keep reference
+                
+                # Position at bottom center, with some padding
+                x_pos = (canvas_width - new_width) / 2
+                y_pos = canvas_height - (target_height + 10 * scale_y) # 10 padding from bottom
+                self.canvas.create_image(x_pos + new_width/2, y_pos + target_height/2, image=footer_tk_image)
 
-                # حفظ نسبت تصویر
-                aspect_ratio = footer_pil_image.width / footer_pil_image.height
-                if footer_label_width / aspect_ratio > footer_label_height:
-                    new_height = footer_label_height
-                    new_width = int(new_height * aspect_ratio)
-                else:
-                    new_width = footer_label_width
-                    new_height = int(new_width / aspect_ratio)
-
-                if new_width == 0 or new_height == 0:
-                    new_width = 100
-                    new_height = 50
-
-                footer_pil_image = footer_pil_image.resize((new_width, new_height), Image.LANCZOS)
-                self.footer_ctk_image = ctk.CTkImage(light_image=footer_pil_image, dark_image=footer_pil_image, size=(new_width, new_height))
-                self.footer_label.configure(image=self.footer_ctk_image, text="")
             except Exception as e:
                 print(f"Error loading footer image for preview: {e}")
-                self.footer_label.configure(text="خطا در بارگذاری فوتر", image=None, text_color="red", font=self.base_font)
-        else: 
-             self.footer_label.configure(text="(لوگوی پاورقی اینجا قرار می‌گیرد)", image=None, text_color=self.ui_colors["text_medium_gray"], font=self.base_font)
+                self.canvas.create_text(canvas_width/2, canvas_height - (30 * scale_y), text="خطا در بارگذاری فوتر", font=self.base_font, fill="red")
+
+        # Draw static text elements from template_settings
+        if 'static_text_elements' in self.template.template_settings:
+            for element in self.template.template_settings['static_text_elements']:
+                text = element.get('text', '')
+                x = element.get('x_pos', 0) * scale_x
+                y_pdf = element.get('y_pos', 0) # Y-coordinate from PDF (bottom-left origin)
+                y_canvas = (a4_height_pt - y_pdf) * scale_y # Convert to Canvas (top-left origin)
+                align = element.get('align', 'right')
+                font_size = int(element.get('font_size', 10) * min(scale_x, scale_y)) # Scale font size too
+                font_bold = element.get('font_bold', False)
+                
+                # Simple placeholder replacement for preview
+                # Just show the placeholder name for now or a sample value
+                text = re.sub(r'\{\{([a-zA-Z0-9_]+)\}\}', r'<\1>', text) 
+
+                anchor = "e" # Default to right (east)
+                if align == 'left':
+                    anchor = "w" # West
+                elif align == 'center':
+                    anchor = "center"
+                
+                font_tuple = (self.base_font[0], font_size, "bold" if font_bold else "")
+                
+                self.canvas.create_text(x, y_canvas, text=text, font=font_tuple, anchor=anchor, fill="black", justify=ctk.RIGHT if align == 'right' else ctk.LEFT)
+
+        # Draw placeholder for table if table_configs is present
+        if 'table_configs' in self.template.template_settings:
+            table_config = self.template.template_settings['table_configs'].get('invoice_items_table', {})
+            x_start = table_config.get('x_start', 50) * scale_x
+            y_start_pdf = table_config.get('y_start', 400) # PDF bottom-left origin
+            y_start_canvas = (a4_height_pt - y_start_pdf) * scale_y # Canvas top-left origin
+            width = table_config.get('width', 500) * scale_x
+            
+            # Draw a rectangle for the table area
+            # 5 rows for example: header + 4 items
+            total_table_height = (5 * table_config.get('row_height', 20)) * scale_y 
+            
+            self.canvas.create_rectangle(x_start, y_start_canvas, x_start + width, y_start_canvas + total_table_height, outline="gray", width=1)
+            self.canvas.create_text(x_start + width/2, y_start_canvas + (table_config.get('row_height', 20) * 0.5) * scale_y, text="جدول آیتم‌ها (پیش‌نمایش)", font=self.base_font, fill="gray", anchor=ctk.CENTER)
 
 
 class SettingsUI(ctk.CTkFrame):
@@ -194,12 +213,11 @@ class SettingsUI(ctk.CTkFrame):
         self.available_invoice_fields = [
             "invoice_number", "customer_name", "customer_tax_id", "issue_date", "due_date", 
             "total_amount", "discount_percentage", "tax_percentage", "final_amount", "description",
-            "item_service_description", "item_quantity", "item_unit_price", "item_total_price"
+            "item_service_description", "item_quantity", "item_unit_price", "item_total_price", 
+            "seller_name", "seller_address", "seller_phone", "seller_tax_id", "seller_economic_code", 
+            "contract_number", "contract_title", "contract_date", "contract_total_amount", "contract_description", "contract_payment_method"
         ]
         self.required_fields_vars = {} 
-
-        self.default_tax_percentage_var = ctk.StringVar(value="9")
-        self.default_discount_editable_var = ctk.IntVar(value=1)
 
         self.header_image_path_var = ctk.StringVar()
         self.footer_image_path_var = ctk.StringVar()
@@ -210,8 +228,9 @@ class SettingsUI(ctk.CTkFrame):
         self.template_table = None
         self.delete_template_button = None
         self.preview_template_button = None 
-
-
+        
+        self.template_settings_textbox = None 
+        
         self.create_widgets()
         
         self.current_active_sub_button = None
@@ -502,6 +521,7 @@ class SettingsUI(ctk.CTkFrame):
                         font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=3, column=0, padx=10, pady=10, sticky="e")
 
 
+        # Required Fields Checkboxes (still needed for UI)
         ctk.CTkLabel(template_form_scroll_frame, text="فیلدهای الزامی:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=4, column=1, padx=10, pady=10, sticky="ne")
         required_fields_checkbox_frame = ctk.CTkScrollableFrame(template_form_scroll_frame, width=250, height=120, fg_color="#f8f8f8",
                                                                 border_color=self.ui_colors["border_gray"], corner_radius=5)
@@ -514,15 +534,27 @@ class SettingsUI(ctk.CTkFrame):
             chk.pack(anchor="w", pady=2, padx=5)
             self.required_fields_vars[field] = var
 
-        ctk.CTkLabel(template_form_scroll_frame, text="درصد مالیات پیش‌فرض:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=5, column=1, padx=10, pady=10, sticky="e")
-        ctk.CTkEntry(template_form_scroll_frame, textvariable=self.default_tax_percentage_var, width=100, justify="right",
-                     font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5).grid(row=5, column=0, padx=10, pady=10, sticky="e")
+        # Removed default_tax_percentage_var and default_discount_editable_var entries
+        # These settings are now part of the JSON template_settings_textbox
 
-        ctk.CTkLabel(template_form_scroll_frame, text="تخفیف قابل ویرایش است؟", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=6, column=1, padx=10, pady=10, sticky="e")
-        ctk.CTkCheckBox(template_form_scroll_frame, text="", variable=self.default_discount_editable_var, onvalue=1, offvalue=0,
-                        font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=6, column=0, padx=10, pady=10, sticky="e")
+        row_idx = 5 
 
-        row_idx = 7 
+        # Upload HTML Template section
+        ctk.CTkLabel(template_form_scroll_frame, text="آپلود قالب HTML:", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
+        upload_html_frame = ctk.CTkFrame(template_form_scroll_frame, fg_color="transparent")
+        upload_html_frame.grid(row=row_idx, column=0, padx=10, pady=5, sticky="ew")
+        upload_html_btn = ctk.CTkButton(upload_html_frame, text="انتخاب فایل HTML", font=(self.base_font[0], self.base_font[1]-1),
+                                        command=self.upload_html_template)
+        upload_html_btn.pack(side="right", fill="x", expand=True)
+        row_idx += 1
+
+
+        ctk.CTkLabel(template_form_scroll_frame, text="تنظیمات قالب (JSON):", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=10, sticky="ne")
+        self.template_settings_textbox = ctk.CTkTextbox(template_form_scroll_frame, width=350, height=200, font=(self.base_font[0], 11),
+                                                       fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5, wrap="word")
+        self.template_settings_textbox.grid(row=row_idx, column=0, padx=10, pady=10, sticky="ew")
+        row_idx += 1
+
 
         ctk.CTkLabel(template_form_scroll_frame, text="عکس هدر", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
         header_img_frame = ctk.CTkFrame(template_form_scroll_frame, fg_color="transparent")
@@ -537,18 +569,16 @@ class SettingsUI(ctk.CTkFrame):
         ctk.CTkEntry(footer_img_frame, textvariable=self.footer_image_path_var, width=200, justify="left", font=self.base_font, state="readonly").pack(side="right", expand=True, fill="x", padx=(0,5))
         ctk.CTkButton(footer_img_frame, text="انتخاب", font=(self.base_font[0], self.base_font[1]-1), command=lambda: self.select_image_file(self.footer_image_path_var)).pack(side="right")
         row_idx += 1
-
+        
+        # Disabled background image and opacity fields (now controlled by HTML/JSON via template_settings)
         ctk.CTkLabel(template_form_scroll_frame, text="عکس بک‌گراند", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
         bg_img_frame = ctk.CTkFrame(template_form_scroll_frame, fg_color="transparent")
         bg_img_frame.grid(row=row_idx, column=0, padx=10, pady=5, sticky="ew")
-        # تغییر: state="readonly" برای غیرفعال کردن فیلد عکس بک‌گراند
         ctk.CTkEntry(bg_img_frame, textvariable=self.background_image_path_var, width=200, justify="left", font=self.base_font, state="readonly").pack(side="right", expand=True, fill="x", padx=(0,5))
-        # دکمه انتخاب هم غیرفعال می‌شود اگرچه اینجا نیازی به تغییر state اون نداریم چون فیلد readonly هست
         ctk.CTkButton(bg_img_frame, text="انتخاب", font=(self.base_font[0], self.base_font[1]-1), command=lambda: self.select_image_file(self.background_image_path_var), state="disabled").pack(side="right")
         row_idx += 1
 
         ctk.CTkLabel(template_form_scroll_frame, text="شفافیت بک‌گراند (0-1)", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
-        # تغییر: state="readonly" برای غیرفعال کردن فیلد شفافیت بک‌گراند
         ctk.CTkEntry(template_form_scroll_frame, textvariable=self.background_opacity_var, width=100, justify="right",
                      font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5, state="readonly").grid(row=row_idx, column=0, padx=10, pady=5, sticky="e")
         row_idx += 1
@@ -753,6 +783,9 @@ class SettingsUI(ctk.CTkFrame):
             except ValueError:
                 messagebox.showwarning("خطای ورودی", "کد خدمت باید یک عدد باشد.", master=self)
                 return
+        else: # اگر کد خدمت وارد نشده بود، به صورت خودکار تولید شود
+            service_code = self.service_manager.get_next_service_code()
+
 
         if not description:
             messagebox.showwarning("خطای ورودی", "شرح خدمت نمی‌تواند خالی باشد.", master=self)
@@ -787,23 +820,168 @@ class SettingsUI(ctk.CTkFrame):
         else:
             messagebox.showwarning("هشدار", "هیچ خدمتی برای حذف انتخاب نشده است.", master=self)
 
+    # اضافه شدن متدهای on_service_select و on_service_double_click
     def on_service_select(self, event):
-        """ رویداد انتخاب سطر در جدول (تک کلیک) """
+        """ رویداد انتخاب سطر در جدول خدمات (تک کلیک) """
         selected_items = self.service_table.selection()
         if selected_items:
             selected_item_id = selected_items[0]
-            values = self.service_table.item(selected_item_id, "values")
-            
-            self.selected_service_id = int(values[0]) 
-            self.service_code_var.set(str(values[1])) 
-            self.service_description_var.set(values[2])
-            self.delete_service_button.configure(state="normal") 
+            service_id = int(selected_item_id)
+            service_obj, _ = self.service_manager.get_service_by_id(service_id)
+
+            if service_obj:
+                self.selected_service_id = service_obj.id
+                self.service_code_var.set(str(service_obj.service_code))
+                self.service_description_var.set(service_obj.description)
+                self.delete_service_button.configure(state="normal")
         else:
-            self.clear_service_form() 
+            self.clear_service_form()
 
     def on_service_double_click(self, event):
-        """ رویداد دابل کلیک روی سطر در جدول """
+        """ رویداد دابل کلیک روی سطر در جدول خدمات """
         self.on_service_select(event)
+
+
+    def upload_html_template(self):
+        """ باز کردن دیالوگ انتخاب فایل HTML و تبدیل آن به JSON برای template_settings """
+        file_path = filedialog.askopenfilename(
+            title="انتخاب فایل HTML قالب",
+            filetypes=[("HTML files", "*.html *.htm"), ("All files", "*.*")],
+            master=self 
+        )
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                
+                template_settings_json = self.html_to_template_settings(html_content)
+                self.template_settings_textbox.delete("1.0", "end")
+                self.template_settings_textbox.insert("1.0", json.dumps(template_settings_json, indent=4, ensure_ascii=False))
+                messagebox.showinfo("موفقیت", "فایل HTML با موفقیت بارگذاری و به JSON تبدیل شد.", master=self)
+
+            except Exception as e:
+                messagebox.showerror("خطا در بارگذاری/تبدیل HTML", f"خطا: {e}\nلطفاً از فرمت صحیح HTML و CSS مطمئن شوید.", master=self)
+
+    def html_to_template_settings(self, html_content: str) -> dict:
+        """
+        این تابع HTML را تجزیه کرده و آن را به فرمت JSON برای template_settings تبدیل می‌کند.
+        فقط عناصر با position: absolute و استایل‌های مربوطه را استخراج می‌کند.
+        برای مدیریت مختصات از پایین-چپ (PyMuPDF) به بالا-چپ (HTML/CSS) تبدیل می‌کند.
+        
+        Args:
+            html_content (str): محتوای کامل فایل HTML.
+            
+        Returns:
+            dict: دیکشنری شامل template_settings در قالب JSON.
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        static_text_elements = []
+        
+        # Default A4 dimensions in points
+        a4_width_pt = 595
+        a4_height_pt = 842 
+
+        # Extract elements with position: absolute
+        for el in soup.find_all(style=re.compile(r'position:\s*absolute')):
+            style = el.get('style', '')
+            
+            # Extract position
+            left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
+            top_match = re.search(r'top:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
+            right_match = re.search(r'right:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
+            
+            x_pos = 0.0
+            
+            if left_match:
+                x_pos = float(left_match.group(1))
+            elif right_match: # If right is specified, convert to left (assuming default A4 width 595)
+                right_val = float(right_match.group(1))
+                # تقریب عرض متن برای محاسبه x_pos از right
+                text_len_estimate = len(el.get_text(strip=True)) * 6 # هر کاراکتر تقریبا 6pt
+                x_pos = a4_width_pt - right_val - text_len_estimate 
+            
+            y_pos_html = 0.0 # Default value
+            if top_match:
+                y_pos_html = float(top_match.group(1))
+            
+            # Convert y_pos from HTML (top-left origin) to PDF (bottom-left origin)
+            y_pos_pdf = a4_height_pt - y_pos_html
+
+            # Extract font size
+            font_size_match = re.search(r'font-size:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
+            font_size = float(font_size_match.group(1)) if font_size_match else 10 # Default to 10pt
+            
+            # Extract font-weight (bold)
+            font_bold = False
+            font_weight_match = re.search(r'font-weight:\s*(bold|700)', style)
+            if font_weight_match:
+                font_bold = True
+            
+            # Extract text alignment
+            text_align_match = re.search(r'text-align:\s*(left|right|center)', style)
+            align = text_align_match.group(1) if text_align_match else 'right' # Default to right
+
+            # Extract text content and identify placeholders
+            text_content = el.get_text(strip=True)
+            
+            # Find all placeholders in the text, e.g., {{invoice_number}}
+            placeholders = re.findall(r'\{\{([a-zA-Z0-9_]+)\}\}', text_content)
+            
+            element_data = {
+                "text": text_content,
+                "x_pos": round(x_pos, 2),
+                "y_pos": round(y_pos_pdf, 2),
+                "align": align,
+                "font_size": font_size,
+                "font_bold": font_bold,
+                "can_contain_field": bool(placeholders),
+                "field_placeholders": placeholders,
+                "tag": el.name # For debugging or future advanced parsing
+            }
+            static_text_elements.append(element_data)
+        
+        # --- Default Settings for Template (can be extracted from HTML if needed, but not common) ---
+        # For now, these default settings are hardcoded or taken from previous state.
+        # In a full HTML template, you might have specific tags/elements for these.
+        # For this prototype, we'll assume default values if not explicitly defined by HTML.
+        default_settings = {
+            "tax_percentage": 9,
+            "discount_editable": True,
+        }
+
+        # --- Table Configs (Placeholder for now, needs more detailed HTML structure from user) ---
+        table_configs = {
+            "invoice_items_table": {
+                "x_start": 50,  # Example: will be parsed from specific HTML table container
+                "y_start": 400, # Example: will be parsed
+                "width": 500,   # Example
+                "row_height": 20, # Example
+                "header_elements": [], # Example: will be parsed from table headers
+                "item_field_configs": [] # Example: will be parsed from item rows
+            }
+        }
+        
+        # --- Signature Block Config (Placeholder for now) ---
+        signature_block_config = {
+            "seller_signature_x": 150,
+            "seller_signature_y": 100,
+            "buyer_signature_x": 450,
+            "buyer_signature_y": 100
+        }
+
+        template_settings = {
+            "default_settings": default_settings, # General settings like tax, discount editable
+            "static_text_elements": static_text_elements,
+            "table_configs": table_configs,
+            "signature_block_config": signature_block_config,
+            # Image paths in template_settings (optional, if you want them defined in JSON too)
+            # Otherwise, they are defined in the InvoiceTemplate object directly.
+            "background_image_path": self.background_image_path_var.get() or None,
+            "background_opacity": self.background_opacity_var.get() if self.background_opacity_var.get() is not None else 1.0,
+        }
+        
+        return template_settings
 
     def load_invoice_templates_to_table(self):
         """ بارگذاری قالب‌های صورتحساب از دیتابیس به جدول """
@@ -829,13 +1007,22 @@ class SettingsUI(ctk.CTkFrame):
         for field, var in self.required_fields_vars.items():
             var.set(0) 
         
-        self.default_tax_percentage_var.set("9")
-        self.default_discount_editable_var.set(1)
-
         self.header_image_path_var.set("")
         self.footer_image_path_var.set("")
         self.background_image_path_var.set("")
-        self.background_opacity_var.set(1.0) 
+        self.background_opacity_var.set(1.0)
+
+        self.template_settings_textbox.delete("1.0", "end")
+        self.template_settings_textbox.insert("1.0", json.dumps(
+            {
+                "default_settings": {"tax_percentage": 9, "discount_editable": True},
+                "static_text_elements": [],
+                "table_configs": {},
+                "signature_block_config": {},
+                "background_image_path": None, 
+                "background_opacity": 1.0,     
+            }, indent=4, ensure_ascii=False
+        ))
 
         self.delete_template_button.configure(state="disabled")
         self.preview_template_button.configure(state="disabled") 
@@ -855,21 +1042,29 @@ class SettingsUI(ctk.CTkFrame):
             return
 
         required_fields = [field for field, var in self.required_fields_vars.items() if var.get() == 1]
-
-        default_tax_percentage_str = self.default_tax_percentage_var.get()
-        default_tax_percentage = float(default_tax_percentage_str) if default_tax_percentage_str else 0.0
-
-        default_settings = {
-            "tax_percentage": default_tax_percentage,
-            "discount_editable": bool(self.default_discount_editable_var.get()),
-        }
         
+        template_settings_str = self.template_settings_textbox.get("1.0", "end").strip()
+        try:
+            template_settings_json = json.loads(template_settings_str)
+        except json.JSONDecodeError as e:
+            messagebox.showwarning("خطای ورودی", f"فرمت JSON تنظیمات قالب نامعتبر است: {e}", master=self)
+            return
+
         header_image_path = self.header_image_path_var.get() or None
         footer_image_path = self.footer_image_path_var.get() or None
-        # تغییر: background_image_path و background_opacity از template گرفته نمی‌شود
-        # background_image_path = self.background_image_path_var.get() or None
-        # background_opacity_val = self.background_opacity_var.get()
-        # background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
+        
+        # background_image_path و background_opacity باید از داخل template_settings_json خوانده شوند
+        # و نه از متغیرهای UI، چون دیگر در UI قابل ویرایش نیستند.
+        # این بخش باید اصلاح شود تا background_image_path و background_opacity را از template_settings_json بگیرد
+        # و آن را به شیء InvoiceTemplate منتقل کند.
+        # اما در حال حاضر این فیلدها در خود InvoiceTemplate مدل وجود دارند.
+        # پس باید در اینجا نیز مقداردهی شوند.
+        # اگر از JSON میگیریم، باید از `template_settings_json.get(...)` استفاده شود.
+        # اگر از UI میگیریم، باید از `self.background_image_path_var.get()` و `self.background_opacity_var.get()` استفاده شود.
+        # با توجه به اینکه در create_invoice_templates_form این دو فیلد حالت readonly دارند
+        # پس مقادیرشان باید از JSON (یعنی template_settings_textbox) خوانده شود.
+        background_image_path_from_json = template_settings_json.get("background_image_path", None)
+        background_opacity_from_json = template_settings_json.get("background_opacity", 1.0)
 
 
         updated_template = InvoiceTemplate(
@@ -877,13 +1072,12 @@ class SettingsUI(ctk.CTkFrame):
             template_name=template_name,
             template_type=template_type,
             required_fields=required_fields,
-            default_settings=default_settings,
+            template_settings=template_settings_json, # استفاده از JSON پارس شده
             is_active=is_active,
             header_image_path=header_image_path,
             footer_image_path=footer_image_path,
-            # تغییر: background_image_path و background_opacity از template گرفته نمی‌شود
-            # background_image_path=background_image_path,
-            # background_opacity=background_opacity
+            background_image_path=background_image_path_from_json, 
+            background_opacity=background_opacity_from_json
         )
 
         if self.selected_template_id:
@@ -930,15 +1124,25 @@ class SettingsUI(ctk.CTkFrame):
                 for field, var in self.required_fields_vars.items():
                     var.set(1 if field in template_obj.required_fields else 0)
                 
-                self.default_tax_percentage_var.set(str(template_obj.default_settings.get("tax_percentage", 9)))
-                self.default_discount_editable_var.set(template_obj.default_settings.get("discount_editable", True))
+                # Display template_settings JSON
+                try:
+                    self.template_settings_textbox.delete("1.0", "end")
+                    self.template_settings_textbox.insert("1.0", json.dumps(template_obj.template_settings, indent=4, ensure_ascii=False))
+                except Exception as e:
+                    self.template_settings_textbox.delete("1.0", "end")
+                    self.template_settings_textbox.insert("1.0", f"Error loading settings JSON: {e}")
                 
-                # اینجا مسیرهای رشته‌ای به متغیرها ست می‌شوند
+                # Image paths
                 self.header_image_path_var.set(template_obj.header_image_path or "")
                 self.footer_image_path_var.set(template_obj.footer_image_path or "")
-                # تغییر: background_image_path و background_opacity ست نمی‌شود
-                # self.background_image_path_var.set(template_obj.background_image_path or "")
-                # self.background_opacity_var.set(template_obj.background_opacity if template_obj.background_opacity is not None else 1.0)
+                # Background image paths and opacity are now part of template_settings JSON
+                # so they are not directly set from template_obj.background_image_path etc.
+                # However, for the UI, we might still want to display them if they exist in the JSON
+                # Or, if they are solely for InvoiceGenerator, they don't need UI display here.
+                # Since they are in the model, they should be in the JSON.
+                self.background_image_path_var.set(template_obj.background_image_path or "")
+                self.background_opacity_var.set(template_obj.background_opacity if template_obj.background_opacity is not None else 1.0)
+
 
                 self.delete_template_button.configure(state="normal")
                 self.preview_template_button.configure(state="normal") 
@@ -955,29 +1159,30 @@ class SettingsUI(ctk.CTkFrame):
             messagebox.showwarning("هشدار", "لطفاً یک قالب را برای پیش‌نمایش انتخاب کنید.", master=self)
             return
         
-        # تغییر: background_opacity_val و effective_background_opacity موقتاً غیر فعال شد
-        # background_opacity_val = self.background_opacity_var.get()
-        # effective_background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
+        # Read current JSON from textbox for preview
+        template_settings_str = self.template_settings_textbox.get("1.0", "end").strip()
+        try:
+            current_template_settings = json.loads(template_settings_str)
+        except json.JSONDecodeError as e:
+            messagebox.showwarning("خطا", f"JSON تنظیمات قالب نامعتبر است: {e}", master=self)
+            return
 
+        # Create a temporary InvoiceTemplate object with current UI values for preview
         temp_template = InvoiceTemplate(
             id=self.selected_template_id,
             template_name=self.template_name_var.get().strip(),
             template_type=self.template_type_var.get(),
             required_fields=[field for field, var in self.required_fields_vars.items() if var.get() == 1],
-            default_settings={
-                "tax_percentage": float(self.default_tax_percentage_var.get() or 0),
-                "discount_editable": bool(self.default_discount_editable_var.get()),
-            },
+            template_settings=current_template_settings, # Use JSON from textbox
             is_active=self.is_active_var.get(),
             header_image_path=self.header_image_path_var.get() or None,
             footer_image_path=self.footer_image_path_var.get() or None,
-            # تغییر: background_image_path و background_opacity ارسال نمی‌شود
-            # background_image_path=self.background_image_path_var.get() or None,
-            # background_opacity=effective_background_opacity
+            background_image_path=self.background_image_path_var.get() or None, # Read from UI var, will be populated from JSON on load
+            background_opacity=self.background_opacity_var.get() if self.background_opacity_var.get() is not None else 1.0 # Read from UI var
         )
         
         # در اینجا `temp_template` که حاوی مسیرهای رشته‌ای هست رو به پنجره پیش‌نمایش پاس میدیم
-        InvoiceTemplatePreviewWindow(self.master, temp_template, self.ui_colors, self.base_font, self.heading_font) 
+        InvoiceTemplatePreviewWindow(self, temp_template, self.ui_colors, self.base_font, self.heading_font) 
 
     def show_sub_frame(self, page_name):
         """ نمایش یک فریم خاص در منوی تنظیمات """
@@ -1051,7 +1256,7 @@ class SettingsUI(ctk.CTkFrame):
 if __name__ == "__main__":
     root = ctk.CTk()
     root.title("تنظیمات easy_invoice (تست مستقل)")
-    root.geometry("600x400")
+    root.geometry("800x600") # Increased size for better view
     ctk.set_appearance_mode("light") 
     
     default_font_family = "Vazirmatn"
@@ -1101,7 +1306,7 @@ if __name__ == "__main__":
             template_name="قالب پیش‌فرض",
             template_type="PDF_Standard",
             required_fields=["invoice_number", "customer_name", "total_amount"],
-            default_settings={"tax_percentage": 9, "discount_editable": True},
+            template_settings={"default_settings": {"tax_percentage": 9, "discount_editable": True}, "static_text_elements": [], "table_configs": {}, "signature_block_config": {}},
             is_active=1
         ))
 

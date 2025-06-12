@@ -4,7 +4,7 @@ import os
 import sys
 
 DATABASE_NAME = "easy_invoice.db"
-DATABASE_SCHEMA_VERSION = 14 # افزایش یافت به 14
+DATABASE_SCHEMA_VERSION = 15 # افزایش یافت به 15
 
 class DBManager:
     def __init__(self, db_path):
@@ -130,7 +130,7 @@ class DBManager:
                 template_name TEXT UNIQUE NOT NULL,
                 template_type TEXT NOT NULL,
                 required_fields TEXT,       -- JSON array of required field names
-                default_settings TEXT,      -- JSON object of default values/rules
+                template_settings TEXT,      -- تغییر از default_settings به template_settings (JSON object of default values/rules)
                 is_active INTEGER DEFAULT 1, -- 1 for active, 0 for inactive
                 header_image_path TEXT,     -- مسیر عکس هدر
                 footer_image_path TEXT,     -- مسیر عکس فوتر
@@ -512,6 +512,50 @@ class DBManager:
                 self.set_db_version(14)
             except sqlite3.Error as e:
                 print(f"Error migrating to version 14 (InvoiceTemplates schema change for images): {e}")
+        
+        # بلاک مهاجرت جدید برای تغییر نام default_settings به template_settings
+        if current_db_version < 15:
+            print("Migrating to version 15: Renaming 'default_settings' to 'template_settings' in InvoiceTemplates table...")
+            try:
+                # مرحله 1: ایجاد جدول موقت با شمای جدید
+                self.execute_query("""
+                    CREATE TABLE InvoiceTemplates_temp (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        template_name TEXT UNIQUE NOT NULL,
+                        template_type TEXT NOT NULL,
+                        required_fields TEXT,
+                        template_settings TEXT, -- فیلد جدید
+                        is_active INTEGER DEFAULT 1,
+                        header_image_path TEXT,
+                        footer_image_path TEXT,
+                        background_image_path TEXT,
+                        background_opacity REAL
+                    );
+                """)
+                # مرحله 2: کپی داده‌ها از جدول قدیمی به جدول موقت
+                # توجه: اگر default_settings قبلاً NULL یا خالی بوده، اینجا به صورت '{}' کپی می‌شود.
+                self.execute_query("""
+                    INSERT INTO InvoiceTemplates_temp (
+                        id, template_name, template_type, required_fields, 
+                        template_settings, is_active, header_image_path, 
+                        footer_image_path, background_image_path, background_opacity
+                    )
+                    SELECT 
+                        id, template_name, template_type, required_fields, 
+                        COALESCE(default_settings, '{}'), -- اگر default_settings خالی بود، '{}' را بگذار
+                        is_active, header_image_path, 
+                        footer_image_path, background_image_path, background_opacity
+                    FROM InvoiceTemplates;
+                """)
+                # مرحله 3: حذف جدول قدیمی
+                self.execute_query("DROP TABLE InvoiceTemplates;")
+                # مرحله 4: تغییر نام جدول موقت به نام اصلی
+                self.execute_query("ALTER TABLE InvoiceTemplates_temp RENAME TO InvoiceTemplates;")
+                
+                print("Migration to version 15 successful.")
+                self.set_db_version(15)
+            except sqlite3.Error as e:
+                print(f"Error migrating to version 15 (InvoiceTemplates schema change for template_settings): {e}")
 
 
         if current_db_version < DATABASE_SCHEMA_VERSION:

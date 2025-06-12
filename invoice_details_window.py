@@ -68,6 +68,9 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         self.tax_percentage_var = ctk.StringVar(value="9") # Default VAT (now from template)
         self.total_amount_var = ctk.StringVar(value="0") # Sum of items
         self.final_amount_var = ctk.StringVar(value="0") # total - discount + tax
+        
+        # Reference to discount entry for state change
+        self.discount_entry = None 
 
         # Invoice Items
         self.invoice_items_tree = None
@@ -201,9 +204,9 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(totals_frame, textvariable=self.total_amount_var, font=self.base_font, justify="right", state="readonly", width=150).grid(row=0, column=2, padx=5, sticky="ew")
 
         ctk.CTkLabel(totals_frame, text="درصد تخفیف:", font=self.base_font).grid(row=1, column=3, padx=5, sticky="e")
-        discount_entry = ctk.CTkEntry(totals_frame, textvariable=self.discount_percentage_var, font=self.base_font, justify="right", width=150)
-        discount_entry.grid(row=1, column=2, padx=5, sticky="ew")
-        discount_entry.bind("<KeyRelease>", self.calculate_final_amount)
+        self.discount_entry = ctk.CTkEntry(totals_frame, textvariable=self.discount_percentage_var, font=self.base_font, justify="right", width=150) # Added reference
+        self.discount_entry.grid(row=1, column=2, padx=5, sticky="ew")
+        self.discount_entry.bind("<KeyRelease>", self.calculate_final_amount)
 
         ctk.CTkLabel(totals_frame, text="درصد مالیات:", font=self.base_font).grid(row=2, column=3, padx=5, sticky="e")
         tax_entry = ctk.CTkEntry(totals_frame, textvariable=self.tax_percentage_var, font=self.base_font, justify="right", width=150)
@@ -263,9 +266,10 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
 
     def apply_template_settings(self):
         """ اعمال تنظیمات پیش‌فرض و قوانین قالب انتخاب شده به فرم صورتحساب. """
-        if self.selected_invoice_template and self.selected_invoice_template.default_settings:
-            default_settings = self.selected_invoice_template.default_settings
-
+        if self.selected_invoice_template and self.selected_invoice_template.template_settings: # تغییر نام default_settings به template_settings
+            # تنظیمات پیش‌فرض (مثل tax_percentage, discount_editable) در یک کلید 'default_settings' در template_settings قرار دارند
+            default_settings = self.selected_invoice_template.template_settings.get('default_settings', {}) # اضافه شد: get('default_settings', {})
+            
             # اعمال درصد مالیات
             if "tax_percentage" in default_settings:
                 try:
@@ -282,9 +286,12 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
                 except ValueError:
                     pass
 
-            if "discount_editable" in default_settings and not default_settings["discount_editable"]:
-                self.discount_percentage_var.set("0") # اگر قابل ویرایش نیست، صفر شود
-                # TODO: اینجا باید Entry مربوط به تخفیف را غیرفعال کنیم، اما فعلاً مستقیم به Entry دسترسی نداریم
+            if "discount_editable" in default_settings:
+                if not default_settings["discount_editable"]:
+                    self.discount_entry.configure(state="readonly")
+                    self.discount_percentage_var.set("0") # اگر قابل ویرایش نیست، صفر شود
+                else:
+                    self.discount_entry.configure(state="normal")
             
             self.calculate_final_amount() # محاسبه مجدد پس از اعمال تنظیمات قالب
 
@@ -308,7 +315,7 @@ class InvoiceDetailsWindow(ctk.CTkToplevel):
             self.calculate_final_amount() # Recalculate invoice totals when item changes
         except ValueError:
             self.current_item_total_price_var.set("0")
-            messagebox.showwarning("خطای ورودی", "تعداد و قیمت واحد باید اعداد معتبر باشند.", master=self)
+            # messagebox.showwarning("خطای ورودی", "تعداد و قیمت واحد باید اعداد معتبر باشند.", master=self) # Commented out to avoid repetitive popups
 
 
     def format_amount_input(self, event=None):

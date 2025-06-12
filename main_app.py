@@ -12,6 +12,7 @@ from customer_ui import CustomerUI
 from contract_ui import ContractUI 
 from invoice_manager_ui import InvoiceManagerUI # تغییر: Import InvoiceManagerUI بجای دوتا فایل جداگانه
 from settings_manager import SettingsManager 
+from invoice_template_manager import InvoiceTemplateManager # اضافه شد
 
 class MainApplication(ctk.CTk):
     def __init__(self):
@@ -223,7 +224,6 @@ class MainApplication(ctk.CTk):
                                            corner_radius=8,
                                            command=lambda: self.on_top_nav_button_click("customers", self.customers_btn))
         self.customers_btn.grid(row=0, column=2, padx=5, pady=0)
-
         self.contracts_btn = ctk.CTkButton(nav_buttons_container, text="مدیریت قراردادها", 
                                            font=self.nav_button_font,
                                            fg_color=self.ui_colors["background_light_gray"], 

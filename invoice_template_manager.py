@@ -16,13 +16,13 @@ class InvoiceTemplateManager:
         try:
             query = """
             INSERT INTO InvoiceTemplates (
-                template_name, template_type, required_fields, default_settings, is_active,
+                template_name, template_type, required_fields, template_settings, is_active,
                 header_image_path, footer_image_path, background_image_path, background_opacity
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             params = (
                 template.template_name, template.template_type, 
-                json.dumps(template.required_fields), json.dumps(template.default_settings),
+                json.dumps(template.required_fields), json.dumps(template.template_settings), # تغییر از default_settings به template_settings
                 template.is_active,
                 template.header_image_path, template.footer_image_path, template.background_image_path, template.background_opacity
             )
@@ -93,13 +93,13 @@ class InvoiceTemplateManager:
             query = """
             UPDATE InvoiceTemplates SET
                 template_name = ?, template_type = ?, required_fields = ?, 
-                default_settings = ?, is_active = ?,
+                template_settings = ?, is_active = ?, -- تغییر از default_settings به template_settings
                 header_image_path = ?, footer_image_path = ?, background_image_path = ?, background_opacity = ?
             WHERE id = ?
             """
             params = (
                 template.template_name, template.template_type, 
-                json.dumps(template.required_fields), json.dumps(template.default_settings),
+                json.dumps(template.required_fields), json.dumps(template.template_settings), # تغییر از default_settings به template_settings
                 template.is_active,
                 template.header_image_path, template.footer_image_path, template.background_image_path, template.background_opacity,
                 template.id

@@ -228,7 +228,7 @@ class InvoiceItem:
 class InvoiceTemplate:
     """ مدل داده‌ای برای قالب‌های صورتحساب """
     def __init__(self, id=None, template_name=None, template_type=None, 
-                 required_fields=None, default_settings=None, is_active=1, 
+                 required_fields=None, template_settings=None, is_active=1, # تغییر نام default_settings به template_settings
                  header_image_path=None, footer_image_path=None, 
                  background_image_path=None, background_opacity=1.0): # تغییرات جدید
         self.id = id
@@ -244,13 +244,14 @@ class InvoiceTemplate:
         else:
             self.required_fields = required_fields if required_fields is not None else []
             
-        if isinstance(default_settings, str):
+        # تغییر هندل کردن default_settings به template_settings
+        if isinstance(template_settings, str):
             try:
-                self.default_settings = json.loads(default_settings)
+                self.template_settings = json.loads(template_settings)
             except json.JSONDecodeError:
-                self.default_settings = {}
+                self.template_settings = {}
         else:
-            self.default_settings = default_settings if default_settings is not None else {}
+            self.template_settings = template_settings if template_settings is not None else {}
             
         self.is_active = is_active
         # self.notes = notes # حذف شد
@@ -265,7 +266,7 @@ class InvoiceTemplate:
             "template_name": self.template_name,
             "template_type": self.template_type,
             "required_fields": json.dumps(self.required_fields),
-            "default_settings": json.dumps(self.default_settings),
+            "template_settings": json.dumps(self.template_settings), # تغییر نام default_settings به template_settings
             "is_active": self.is_active,
             # "notes": self.notes, # حذف شد
             "header_image_path": self.header_image_path,
@@ -280,9 +281,17 @@ class InvoiceTemplate:
         data_copy = data.copy()
         if 'required_fields' in data_copy and isinstance(data_copy['required_fields'], str):
             data_copy['required_fields'] = json.loads(data_copy['required_fields'])
-        if 'default_settings' in data_copy and isinstance(data_copy['default_settings'], str):
-            data_copy['default_settings'] = json.loads(data_copy['default_settings'])
         
+        # تغییر هندل کردن default_settings به template_settings
+        if 'default_settings' in data_copy: # برای مهاجرت از نسخه قدیمی
+            if isinstance(data_copy['default_settings'], str):
+                data_copy['template_settings'] = json.loads(data_copy['default_settings'])
+            else:
+                data_copy['template_settings'] = data_copy['default_settings']
+            data_copy.pop('default_settings', None)
+        elif 'template_settings' in data_copy and isinstance(data_copy['template_settings'], str):
+            data_copy['template_settings'] = json.loads(data_copy['template_settings'])
+
         # حذف فیلد notes اگر هنوز در دیتابیس وجود داشت
         data_copy.pop('notes', None)
 
