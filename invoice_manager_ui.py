@@ -3,7 +3,6 @@ import customtkinter as ctk
 from tkinter import messagebox
 import os
 
-# این خط باید حذف شود: from invoice_manager_ui import InvoiceManagerUI # تغییر: Import InvoiceManagerUI بجای دوتا فایل جداگانه
 # Import the individual UI components for invoices
 from invoice_main_ui import InvoiceMainUI
 from invoice_list_ui import InvoiceListUI
@@ -102,7 +101,8 @@ class InvoiceManagerUI(ctk.CTkFrame):
             if page_name == "list_invoices":
                 frame.load_invoices_to_table() # Ensure list is refreshed when tab is opened
             elif page_name == "create_invoice":
-                frame.load_contracts_to_dropdown() # Refresh contracts if needed
+                frame.clear_contract_selection() # Reset contract selection on page load
+                frame.load_templates_to_dropdown() # Refresh templates if needed
 
         else:
             messagebox.showwarning("زیرصفحه هنوز پیاده‌سازی نشده", f"زیرصفحه '{page_name}' هنوز در دست ساخت است.", master=self)
@@ -196,6 +196,8 @@ if __name__ == "__main__":
     from contract_manager import ContractManager
     from models import Customer, Service, Contract, AppSettings
     from settings_manager import SettingsManager # Added for test setup
+    from invoice_template_manager import InvoiceTemplateManager
+
 
     temp_db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), DATABASE_NAME)
     temp_db_manager = DBManager(temp_db_path)
@@ -210,6 +212,7 @@ if __name__ == "__main__":
     svc_man = ServiceManager()
     cont_man = ContractManager()
     settings_man = SettingsManager()
+    tmpl_man = InvoiceTemplateManager()
 
     if not cust_man.get_all_customers()[0]:
         cust_man.add_customer(Customer(customer_code=1001, name="مشتری تست صورتحساب", customer_type="حقوقی", tax_id="11111111111", email="invoice_test@example.com", address="آدرس تست"))
@@ -225,7 +228,7 @@ if __name__ == "__main__":
             cont_man.add_contract(Contract(
                 customer_id=test_customer_id,
                 contract_number="C-TEST-001",
-                contract_date="1403/01/01",
+                contract_date=jdatetime.date.today().strftime("%Y/%m/%d"),
                 total_amount=50000000,
                 description="قرارداد تست برای صدور صورتحساب",
                 title="قرارداد خدمات نرم افزاری",
@@ -246,6 +249,15 @@ if __name__ == "__main__":
         )
         settings_man.save_settings(dummy_settings)
 
+    # ایجاد قالب صورتحساب تست اگر وجود ندارد
+    if not tmpl_man.get_all_templates()[0]:
+        tmpl_man.add_template(InvoiceTemplate(
+            template_name="قالب پیش‌فرض",
+            template_type="PDF_Standard",
+            required_fields=["invoice_number", "customer_name", "total_amount", "item_service_description"],
+            default_settings={"tax_percentage": 9, "discount_editable": True},
+            is_active=1
+        ))
 
     invoice_manager_frame = InvoiceManagerUI(root, temp_db_manager, test_ui_colors, base_font_tuple, heading_font_tuple, button_font_tuple, nav_button_font_tuple)
     invoice_manager_frame.pack(fill="both", expand=True)

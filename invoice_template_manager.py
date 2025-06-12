@@ -16,13 +16,15 @@ class InvoiceTemplateManager:
         try:
             query = """
             INSERT INTO InvoiceTemplates (
-                template_name, template_type, required_fields, default_settings, is_active, notes
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                template_name, template_type, required_fields, default_settings, is_active,
+                header_image_path, footer_image_path, background_image_path, background_opacity
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             params = (
                 template.template_name, template.template_type, 
                 json.dumps(template.required_fields), json.dumps(template.default_settings),
-                template.is_active, template.notes
+                template.is_active,
+                template.header_image_path, template.footer_image_path, template.background_image_path, template.background_opacity
             )
             cursor = self.db_manager.execute_query(query, params)
             self.db_manager.close()
@@ -70,6 +72,20 @@ class InvoiceTemplateManager:
         self.db_manager.close()
         return template, "قالب صورتحساب با موفقیت بازیابی شد."
 
+    def get_template_by_id(self, template_id: int):
+        """ بازیابی یک قالب بر اساس شناسه. """
+        if not self.db_manager.connect():
+            return None, "خطا در اتصال به دیتابیس."
+        query = "SELECT * FROM InvoiceTemplates WHERE id = ?"
+        cursor = self.db_manager.execute_query(query, (template_id,))
+        template = None
+        if cursor:
+            row = cursor.fetchone()
+            if row:
+                template = InvoiceTemplate.from_dict(dict(row))
+        self.db_manager.close()
+        return template, "قالب صورتحساب با موفقیت بازیابی شد."
+
     def update_template(self, template: InvoiceTemplate):
         if not self.db_manager.connect():
             return False, "خطا در اتصال به دیتابیس."
@@ -77,13 +93,16 @@ class InvoiceTemplateManager:
             query = """
             UPDATE InvoiceTemplates SET
                 template_name = ?, template_type = ?, required_fields = ?, 
-                default_settings = ?, is_active = ?, notes = ?
+                default_settings = ?, is_active = ?,
+                header_image_path = ?, footer_image_path = ?, background_image_path = ?, background_opacity = ?
             WHERE id = ?
             """
             params = (
                 template.template_name, template.template_type, 
                 json.dumps(template.required_fields), json.dumps(template.default_settings),
-                template.is_active, template.notes, template.id
+                template.is_active,
+                template.header_image_path, template.footer_image_path, template.background_image_path, template.background_opacity,
+                template.id
             )
             cursor = self.db_manager.execute_query(query, params)
             self.db_manager.close()

@@ -2,14 +2,14 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, ttk
 import os
-from PIL import Image, ImageDraw, ImageFont # ImageDraw, ImageFont اضافه شد برای پیش نمایش A4
-import json # اضافه شد برای هندل کردن JSON در قالب‌ها
+from PIL import Image # فقط Image از PIL وارد می‌شود
+import json 
 
 from settings_manager import SettingsManager
 from service_manager import ServiceManager
-from models import AppSettings, Service, InvoiceTemplate # InvoiceTemplate اضافه شد
+from models import AppSettings, Service, InvoiceTemplate 
 from db_manager import DBManager, DATABASE_NAME
-from invoice_template_manager import InvoiceTemplateManager # اضافه شد
+from invoice_template_manager import InvoiceTemplateManager 
 
 class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
     def __init__(self, master, template: InvoiceTemplate, ui_colors, base_font, heading_font):
@@ -22,93 +22,145 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
 
-        # تنظیم اندازه پنجره به اندازه A4 در CustomTkinter
-        # A4 paper size: 210 x 297 mm
-        # Approx. 794 x 1123 pixels at 96 DPI (standard screen DPI)
-        # We can scale this down for preview to fit screen comfortably
-        a4_width_px = 794 // 1.5 # Scale down for preview
+        a4_width_px = 794 // 1.5 
         a4_height_px = 1123 // 1.5
 
         self.geometry(f"{int(a4_width_px)}x{int(a4_height_px)}")
         self.resizable(False, False)
 
-        self.canvas = ctk.CTkCanvas(self, bg="white", highlightthickness=1, highlightbackground=self.ui_colors["border_gray"])
-        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
+        # فریم اصلی برای سازماندهی عناصر
+        main_container_frame = ctk.CTkFrame(self, fg_color="white", corner_radius=0)
+        main_container_frame.pack(fill="both", expand=True)
+        main_container_frame.grid_rowconfigure(0, weight=0) # هدر
+        main_container_frame.grid_rowconfigure(1, weight=1) # کانتنت (canvas)
+        main_container_frame.grid_rowconfigure(2, weight=0) # فوتر
+        main_container_frame.grid_columnconfigure(0, weight=1)
 
-        self.draw_preview()
+        # لیبل برای هدر (برای نمایش عکس هدر)
+        self.header_label = ctk.CTkLabel(main_container_frame, text="", fg_color="transparent")
+        self.header_label.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
 
-        # دکمه بستن
+        # Canvas برای تصویر پس‌زمینه و متن اصلی
+        self.canvas = ctk.CTkCanvas(main_container_frame, bg="white", highlightthickness=1, highlightbackground=self.ui_colors["border_gray"])
+        self.canvas.grid(row=1, column=0, sticky="nsew", padx=10, pady=0) # pady=0 چون هدر و فوتر جدا شدن
+
+        # لیبل برای فوتر (برای نمایش عکس فوتر)
+        self.footer_label = ctk.CTkLabel(main_container_frame, text="", fg_color="transparent")
+        self.footer_label.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
+
+        # متغیرهایی برای نگهداری ارجاع به تصاویر CTkImage
+        self.header_ctk_image = None
+        self.footer_ctk_image = None
+        self.bg_ctk_image = None #
+
+        self.after(10, self.draw_preview) 
+
         close_btn = ctk.CTkButton(self, text="بستن", command=self.destroy,
                                   font=self.base_font, fg_color="#999999", hover_color="#777777")
         close_btn.pack(pady=5)
 
     def draw_preview(self):
+        # پاک کردن محتوای Canvas (متن)
         self.canvas.delete("all")
+
+        # ابعاد Canvas
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
 
-        if canvas_width == 1 or canvas_height == 1: # اگر هنوز ابعاد کَنواس مشخص نیست (مثلاً در شروع برنامه)
-            self.after(100, self.draw_preview) # کمی صبر کن و دوباره تلاش کن
+        # اگر پنجره هنوز به طور کامل رندر نشده یا بسته شده، دوباره تلاش کن
+        if canvas_width == 1 or canvas_height == 1 or not self.winfo_exists():
+            self.after(100, self.draw_preview)
             return
         
-        # --- Draw Background Image ---
-        if self.template.background_image_path and os.path.exists(self.template.background_image_path):
-            try:
-                bg_pil_image = Image.open(self.template.background_image_path)
-                bg_pil_image = bg_pil_image.resize((canvas_width, canvas_height), Image.LANCZOS)
+        # --- Draw Background Image on Canvas (فعلا غیرفعال شد) ---
+        # bg_image_path = self.template.background_image_path
+        # if bg_image_path and os.path.exists(bg_image_path):
+        #     try:
+        #         bg_pil_image = Image.open(bg_image_path) 
+        #         bg_pil_image = bg_pil_image.resize((canvas_width, canvas_height), Image.LANCZOS)
                 
-                # برای شفافیت
-                if self.template.background_opacity < 1.0:
-                    alpha = int(255 * self.template.background_opacity)
-                    bg_pil_image.putalpha(alpha) # اگر تصویر حالت آلفا داشته باشد
-                    # برای تصاویر RGB (بدون کانال آلفا) نیاز به تبدیل به RGBA هست
-                    if bg_pil_image.mode != 'RGBA':
-                        bg_pil_image = bg_pil_image.convert('RGBA')
-                        temp_alpha = Image.new('L', bg_pil_image.size, alpha)
-                        bg_pil_image.putalpha(temp_alpha)
+        #         if self.template.background_opacity < 1.0:
+        #             if bg_pil_image.mode != 'RGBA':
+        #                 bg_pil_image = bg_pil_image.convert('RGBA')
+        #             alpha = bg_pil_image.split()[3] 
+        #             alpha = Image.eval(alpha, lambda x: x * self.template.background_opacity) 
+        #             bg_pil_image.putalpha(alpha) 
                         
-                self.bg_ctk_image = ctk.CTkImage(light_image=bg_pil_image, dark_image=bg_pil_image, size=bg_pil_image.size)
-                self.canvas.create_image(canvas_width/2, canvas_height/2, image=self.bg_ctk_image)
-            except Exception as e:
-                print(f"Error loading background image for preview: {e}")
-                self.canvas.create_text(canvas_width/2, canvas_height/2, text="خطا در بارگذاری بک‌گراند", font=self.base_font, fill="red")
+        #         self.bg_ctk_image = ctk.CTkImage(light_image=bg_pil_image, dark_image=bg_pil_image, size=bg_pil_image.size)
+        #         self.canvas.create_image(canvas_width/2, canvas_height/2, image=self.bg_ctk_image)
+        #     except Exception as e:
+        #         print(f"Error loading background image for preview: {e}")
+        #         self.canvas.create_text(canvas_width/2, canvas_height/2, text="خطا در بارگذاری بک‌گراند", font=self.base_font, fill="red")
+        # else: 
+        #      self.canvas.create_text(canvas_width/2, canvas_height/2, text="(تصویر پس‌زمینه اینجا قرار می‌گیرد)", font=self.base_font, fill=self.ui_colors["text_medium_gray"])
 
-        # --- Draw Header Image ---
-        if self.template.header_image_path and os.path.exists(self.template.header_image_path):
+        # --- Display Placeholder Text on Canvas (middle content) ---
+        self.canvas.create_text(canvas_width/2, canvas_height/2, text="متن صورتحساب در اینجا نمایش داده می‌شود", font=self.heading_font, fill=self.ui_colors["text_medium_gray"])
+
+
+        # --- Load and Display Header Image on header_label ---
+        header_image_path = self.template.header_image_path
+        if header_image_path and os.path.exists(header_image_path):
             try:
-                header_pil_image = Image.open(self.template.header_image_path)
-                header_width = int(canvas_width * 0.9) # فرض بر اینکه هدر ۹۰٪ عرض صفحه باشه
-                header_height = int(header_pil_image.height * (header_width / header_pil_image.width))
-                if header_height > canvas_height / 4: # محدودیت ارتفاع برای هدر
-                    header_height = int(canvas_height / 4)
-                    header_width = int(header_pil_image.width * (header_height / header_pil_image.width))
+                header_pil_image = Image.open(header_image_path)
+                # ابعاد تقریبی برای هدر لیبل
+                header_label_width = self.header_label.winfo_width() if self.header_label.winfo_width() > 1 else int(self.winfo_width() * 0.9)
+                header_label_height = 80 # ارتفاع ثابت یا تقریبی برای هدر
+                
+                # حفظ نسبت تصویر
+                aspect_ratio = header_pil_image.width / header_pil_image.height
+                if header_label_width / aspect_ratio > header_label_height:
+                    new_height = header_label_height
+                    new_width = int(new_height * aspect_ratio)
+                else:
+                    new_width = header_label_width
+                    new_height = int(new_width / aspect_ratio)
 
-                header_pil_image = header_pil_image.resize((header_width, header_height), Image.LANCZOS)
-                self.header_ctk_image = ctk.CTkImage(light_image=header_pil_image, dark_image=header_pil_image, size=header_pil_image.size)
-                self.canvas.create_image(canvas_width/2, header_height/2 + 10, image=self.header_ctk_image) # 10px padding from top
+                if new_width == 0 or new_height == 0:
+                    new_width = 100
+                    new_height = 50
+
+                header_pil_image = header_pil_image.resize((new_width, new_height), Image.LANCZOS)
+                self.header_ctk_image = ctk.CTkImage(light_image=header_pil_image, dark_image=header_pil_image, size=(new_width, new_height))
+                self.header_label.configure(image=self.header_ctk_image, text="")
+                # برای تراز وسط، Label خودش این کار رو انجام میده
             except Exception as e:
                 print(f"Error loading header image for preview: {e}")
-                self.canvas.create_text(canvas_width/2, 50, text="خطا در بارگذاری هدر", font=self.base_font, fill="red")
+                self.header_label.configure(text="خطا در بارگذاری هدر", image=None, text_color="red", font=self.base_font)
+        else: 
+             self.header_label.configure(text="(لوگوی سربرگ اینجا قرار می‌گیرد)", image=None, text_color=self.ui_colors["text_medium_gray"], font=self.base_font)
 
-        # --- Draw Footer Image ---
-        if self.template.footer_image_path and os.path.exists(self.template.footer_image_path):
+
+        # --- Load and Display Footer Image on footer_label ---
+        footer_image_path = self.template.footer_image_path
+        if footer_image_path and os.path.exists(footer_image_path):
             try:
-                footer_pil_image = Image.open(self.template.footer_image_path)
-                footer_width = int(canvas_width * 0.9)
-                footer_height = int(footer_pil_image.height * (footer_width / footer_pil_image.width))
-                if footer_height > canvas_height / 4: # محدودیت ارتفاع برای فوتر
-                    footer_height = int(canvas_height / 4)
-                    footer_width = int(footer_pil_image.width * (footer_height / footer_pil_image.width))
+                footer_pil_image = Image.open(footer_image_path)
+                # ابعاد تقریبی برای فوتر لیبل
+                footer_label_width = self.footer_label.winfo_width() if self.footer_label.winfo_width() > 1 else int(self.winfo_width() * 0.9)
+                footer_label_height = 80 # ارتفاع ثابت یا تقریبی برای فوتر
 
-                footer_pil_image = footer_pil_image.resize((footer_width, footer_height), Image.LANCZOS)
-                self.footer_ctk_image = ctk.CTkImage(light_image=footer_pil_image, dark_image=footer_pil_image, size=footer_pil_image.size)
-                self.canvas.create_image(canvas_width/2, canvas_height - footer_height/2 - 10, image=self.footer_ctk_image) # 10px padding from bottom
+                # حفظ نسبت تصویر
+                aspect_ratio = footer_pil_image.width / footer_pil_image.height
+                if footer_label_width / aspect_ratio > footer_label_height:
+                    new_height = footer_label_height
+                    new_width = int(new_height * aspect_ratio)
+                else:
+                    new_width = footer_label_width
+                    new_height = int(new_width / aspect_ratio)
+
+                if new_width == 0 or new_height == 0:
+                    new_width = 100
+                    new_height = 50
+
+                footer_pil_image = footer_pil_image.resize((new_width, new_height), Image.LANCZOS)
+                self.footer_ctk_image = ctk.CTkImage(light_image=footer_pil_image, dark_image=footer_pil_image, size=(new_width, new_height))
+                self.footer_label.configure(image=self.footer_ctk_image, text="")
             except Exception as e:
                 print(f"Error loading footer image for preview: {e}")
-                self.canvas.create_text(canvas_width/2, canvas_height - 50, text="خطا در بارگذاری فوتر", font=self.base_font, fill="red")
-
-        # --- Display Placeholder Text (Optional) ---
-        self.canvas.create_text(canvas_width/2, canvas_height/2, text="متن صورتحساب در اینجا نمایش داده می‌شود", font=self.heading_font, fill=self.ui_colors["text_medium_gray"])
+                self.footer_label.configure(text="خطا در بارگذاری فوتر", image=None, text_color="red", font=self.base_font)
+        else: 
+             self.footer_label.configure(text="(لوگوی پاورقی اینجا قرار می‌گیرد)", image=None, text_color=self.ui_colors["text_medium_gray"], font=self.base_font)
 
 
 class SettingsUI(ctk.CTkFrame):
@@ -135,34 +187,29 @@ class SettingsUI(ctk.CTkFrame):
         self.service_code_var = None
         self.service_table = None
 
-        # متغیرهای مربوط به قالب‌های صورتحساب
         self.selected_template_id = None
         self.template_name_var = ctk.StringVar()
-        self.template_type_var = ctk.StringVar(value="PDF_Standard") # مقدار پیش‌فرض
+        self.template_type_var = ctk.StringVar(value="PDF_Standard") 
 
-        # متغیرها برای فیلدهای الزامی (چک‌باکس‌ها)
         self.available_invoice_fields = [
             "invoice_number", "customer_name", "customer_tax_id", "issue_date", "due_date", 
             "total_amount", "discount_percentage", "tax_percentage", "final_amount", "description",
             "item_service_description", "item_quantity", "item_unit_price", "item_total_price"
         ]
-        self.required_fields_vars = {} # {field_name: ctk.IntVar}
+        self.required_fields_vars = {} 
 
-        # متغیرها برای تنظیمات پیش‌فرض (فیلدهای مستقیم)
         self.default_tax_percentage_var = ctk.StringVar(value="9")
-        self.default_discount_editable_var = ctk.IntVar(value=1) # 1 for editable, 0 for not
-        # ... سایر تنظیمات پیش‌فرض که می‌خواهی به UI اضافه کنی
+        self.default_discount_editable_var = ctk.IntVar(value=1)
 
-        # متغیرها برای مسیر عکس‌ها و شفافیت بک‌گراند
         self.header_image_path_var = ctk.StringVar()
         self.footer_image_path_var = ctk.StringVar()
         self.background_image_path_var = ctk.StringVar()
-        self.background_opacity_var = ctk.DoubleVar(value=1.0) # شفافیت از 0.0 تا 1.0
-        self.is_active_var = ctk.IntVar(value=1) # چک‌باکس فعال بودن قالب
+        self.background_opacity_var = ctk.DoubleVar(value=1.0) 
+        self.is_active_var = ctk.IntVar(value=1) 
 
         self.template_table = None
         self.delete_template_button = None
-        self.preview_template_button = None # اضافه شد
+        self.preview_template_button = None 
 
 
         self.create_widgets()
@@ -197,7 +244,7 @@ class SettingsUI(ctk.CTkFrame):
         
         sub_buttons_container.grid_columnconfigure(0, weight=0)
         sub_buttons_container.grid_columnconfigure(1, weight=0)
-        sub_buttons_container.grid_columnconfigure(2, weight=0) # اضافه شد برای دکمه قالب ها
+        sub_buttons_container.grid_columnconfigure(2, weight=0) 
         sub_buttons_container.grid_rowconfigure(0, weight=1)
         
         self.seller_info_btn = ctk.CTkButton(sub_buttons_container, text="اطلاعات فروشنده", 
@@ -218,7 +265,6 @@ class SettingsUI(ctk.CTkFrame):
                                                 command=lambda: self.on_sub_nav_button_click("service_types", self.service_types_btn))
         self.service_types_btn.grid(row=0, column=1, padx=5, pady=10)
 
-        # اضافه شد: دکمه مدیریت قالب‌های صورتحساب
         self.invoice_templates_btn = ctk.CTkButton(sub_buttons_container, text="مدیریت قالب صورتحساب", 
                                                 font=self.nav_button_font, 
                                                 fg_color=self.ui_colors["white"], 
@@ -242,7 +288,6 @@ class SettingsUI(ctk.CTkFrame):
         self.frames["service_types"] = self.service_types_page
         self.service_types_page.grid(row=0, column=0, sticky="nsew")
 
-        # اضافه شد: فریم مدیریت قالب‌های صورتحساب
         self.invoice_templates_page = self.create_invoice_templates_form(self.settings_content_frame)
         self.frames["invoice_templates"] = self.invoice_templates_page
         self.invoice_templates_page.grid(row=0, column=0, sticky="nsew")
@@ -267,12 +312,12 @@ class SettingsUI(ctk.CTkFrame):
         form_inner_frame.grid_columnconfigure(1, weight=0) 
 
         labels_info = [
-            ("نام فروشنده", "seller_name", "entry"), # حذف ":"
-            ("آدرس", "seller_address", "entry"),     # حذف ":"
-            ("تلفن", "seller_phone", "entry"),       # حذف ":"
-            ("شناسه ملی", "seller_tax_id", "entry"),    # حذف ":"
-            ("کد اقتصادی", "seller_economic_code", "entry"), # حذف ":"
-            ("لوگو", "seller_logo_path", "logo")     # حذف ":"
+            ("نام فروشنده", "seller_name", "entry"), 
+            ("آدرس", "seller_address", "entry"),     
+            ("تلفن", "seller_phone", "entry"),       
+            ("شناسه ملی", "seller_tax_id", "entry"),    
+            ("کد اقتصادی", "seller_economic_code", "entry"), 
+            ("لوگو", "seller_logo_path", "logo")     
         ]
 
         self.entries = {} 
@@ -295,7 +340,7 @@ class SettingsUI(ctk.CTkFrame):
                 logo_frame.grid_columnconfigure(0, weight=1) 
                 logo_frame.grid_columnconfigure(1, weight=0) 
                 logo_frame.grid_columnconfigure(2, weight=0) 
-
+                
                 logo_entry = ctk.CTkEntry(logo_frame, textvariable=self.logo_path_var, width=200, justify="left", 
                                           font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5, state="readonly") 
                 logo_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
@@ -429,7 +474,7 @@ class SettingsUI(ctk.CTkFrame):
         parent_frame.grid_columnconfigure(0, weight=1)
 
         template_types_frame.grid_columnconfigure(0, weight=1)
-        template_types_frame.grid_columnconfigure(1, weight=1) # تغییر: ستون دوم هم وزن گرفت
+        template_types_frame.grid_columnconfigure(1, weight=1) 
         template_types_frame.grid_rowconfigure(0, weight=1)
 
         template_form_scroll_frame = ctk.CTkScrollableFrame(template_types_frame, fg_color="white", corner_radius=10, 
@@ -437,8 +482,8 @@ class SettingsUI(ctk.CTkFrame):
         template_form_scroll_frame.grid(row=0, column=1, padx=(10, 0), pady=0, sticky="nsew")
         
         # پیکربندی ستون‌های داخلی ScrollableFrame
-        template_form_scroll_frame.grid_columnconfigure(0, weight=1) # برای فیلدهای ورودی
-        template_form_scroll_frame.grid_columnconfigure(1, weight=0) # برای لیبل‌ها
+        template_form_scroll_frame.grid_columnconfigure(0, weight=1) 
+        template_form_scroll_frame.grid_columnconfigure(1, weight=0) 
 
         form_title_label = ctk.CTkLabel(template_form_scroll_frame, text="قالب صورتحساب جدید / ویرایش قالب", 
                                         font=self.heading_font, text_color=self.ui_colors["text_dark_gray"])
@@ -496,13 +541,16 @@ class SettingsUI(ctk.CTkFrame):
         ctk.CTkLabel(template_form_scroll_frame, text="عکس بک‌گراند", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
         bg_img_frame = ctk.CTkFrame(template_form_scroll_frame, fg_color="transparent")
         bg_img_frame.grid(row=row_idx, column=0, padx=10, pady=5, sticky="ew")
+        # تغییر: state="readonly" برای غیرفعال کردن فیلد عکس بک‌گراند
         ctk.CTkEntry(bg_img_frame, textvariable=self.background_image_path_var, width=200, justify="left", font=self.base_font, state="readonly").pack(side="right", expand=True, fill="x", padx=(0,5))
-        ctk.CTkButton(bg_img_frame, text="انتخاب", font=(self.base_font[0], self.base_font[1]-1), command=lambda: self.select_image_file(self.background_image_path_var)).pack(side="right")
+        # دکمه انتخاب هم غیرفعال می‌شود اگرچه اینجا نیازی به تغییر state اون نداریم چون فیلد readonly هست
+        ctk.CTkButton(bg_img_frame, text="انتخاب", font=(self.base_font[0], self.base_font[1]-1), command=lambda: self.select_image_file(self.background_image_path_var), state="disabled").pack(side="right")
         row_idx += 1
 
         ctk.CTkLabel(template_form_scroll_frame, text="شفافیت بک‌گراند (0-1)", font=self.base_font, text_color=self.ui_colors["text_dark_gray"]).grid(row=row_idx, column=1, padx=10, pady=5, sticky="e")
+        # تغییر: state="readonly" برای غیرفعال کردن فیلد شفافیت بک‌گراند
         ctk.CTkEntry(template_form_scroll_frame, textvariable=self.background_opacity_var, width=100, justify="right",
-                     font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5).grid(row=row_idx, column=0, padx=10, pady=5, sticky="e")
+                     font=self.base_font, fg_color="#f8f8f8", border_color=self.ui_colors["border_gray"], corner_radius=5, state="readonly").grid(row=row_idx, column=0, padx=10, pady=5, sticky="e")
         row_idx += 1
 
 
@@ -778,26 +826,23 @@ class SettingsUI(ctk.CTkFrame):
         self.template_type_var.set("PDF_Standard")
         self.is_active_var.set(1) 
         
-        # ریست کردن چک‌باکس‌های فیلدهای الزامی
         for field, var in self.required_fields_vars.items():
-            var.set(0) # همه را Uncheck کن
+            var.set(0) 
         
-        # ریست کردن تنظیمات پیش‌فرض
         self.default_tax_percentage_var.set("9")
         self.default_discount_editable_var.set(1)
 
-        # ریست کردن مسیر عکس‌ها و شفافیت
         self.header_image_path_var.set("")
         self.footer_image_path_var.set("")
         self.background_image_path_var.set("")
-        self.background_opacity_var.set(1.0) # مقدار پیش‌فرض عددی
+        self.background_opacity_var.set(1.0) 
 
         self.delete_template_button.configure(state="disabled")
         self.preview_template_button.configure(state="disabled") 
 
 
     def save_invoice_template(self):
-        """ ذخیره (افزودن/ویرایش) قالب صورتحساب در دیتابیس """
+        """ اطلاعات وارد شده در UI را دریافت کرده و اعتبارسنجی کرده و در دیتابیس ذخیره می‌کند. """
         template_name = self.template_name_var.get().strip()
         template_type = self.template_type_var.get()
         is_active = self.is_active_var.get()
@@ -811,7 +856,6 @@ class SettingsUI(ctk.CTkFrame):
 
         required_fields = [field for field, var in self.required_fields_vars.items() if var.get() == 1]
 
-        # اطمینان از تبدیل ایمن به float
         default_tax_percentage_str = self.default_tax_percentage_var.get()
         default_tax_percentage = float(default_tax_percentage_str) if default_tax_percentage_str else 0.0
 
@@ -822,11 +866,10 @@ class SettingsUI(ctk.CTkFrame):
         
         header_image_path = self.header_image_path_var.get() or None
         footer_image_path = self.footer_image_path_var.get() or None
-        background_image_path = self.background_image_path_var.get() or None
-        
-        # اطمینان از تبدیل ایمن به float برای opacity
-        background_opacity_val = self.background_opacity_var.get()
-        background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
+        # تغییر: background_image_path و background_opacity از template گرفته نمی‌شود
+        # background_image_path = self.background_image_path_var.get() or None
+        # background_opacity_val = self.background_opacity_var.get()
+        # background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
 
 
         updated_template = InvoiceTemplate(
@@ -838,8 +881,9 @@ class SettingsUI(ctk.CTkFrame):
             is_active=is_active,
             header_image_path=header_image_path,
             footer_image_path=footer_image_path,
-            background_image_path=background_image_path,
-            background_opacity=background_opacity
+            # تغییر: background_image_path و background_opacity از template گرفته نمی‌شود
+            # background_image_path=background_image_path,
+            # background_opacity=background_opacity
         )
 
         if self.selected_template_id:
@@ -889,11 +933,12 @@ class SettingsUI(ctk.CTkFrame):
                 self.default_tax_percentage_var.set(str(template_obj.default_settings.get("tax_percentage", 9)))
                 self.default_discount_editable_var.set(template_obj.default_settings.get("discount_editable", True))
                 
+                # اینجا مسیرهای رشته‌ای به متغیرها ست می‌شوند
                 self.header_image_path_var.set(template_obj.header_image_path or "")
                 self.footer_image_path_var.set(template_obj.footer_image_path or "")
-                self.background_image_path_var.set(template_obj.background_image_path or "")
-                # اطمینان از مقداردهی DoubleVar با float (حتی اگر None بود)
-                self.background_opacity_var.set(template_obj.background_opacity if template_obj.background_opacity is not None else 1.0)
+                # تغییر: background_image_path و background_opacity ست نمی‌شود
+                # self.background_image_path_var.set(template_obj.background_image_path or "")
+                # self.background_opacity_var.set(template_obj.background_opacity if template_obj.background_opacity is not None else 1.0)
 
                 self.delete_template_button.configure(state="normal")
                 self.preview_template_button.configure(state="normal") 
@@ -910,9 +955,9 @@ class SettingsUI(ctk.CTkFrame):
             messagebox.showwarning("هشدار", "لطفاً یک قالب را برای پیش‌نمایش انتخاب کنید.", master=self)
             return
         
-        # اطمینان از تبدیل ایمن به float برای opacity
-        background_opacity_val = self.background_opacity_var.get()
-        effective_background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
+        # تغییر: background_opacity_val و effective_background_opacity موقتاً غیر فعال شد
+        # background_opacity_val = self.background_opacity_var.get()
+        # effective_background_opacity = float(background_opacity_val) if background_opacity_val is not None else 1.0
 
         temp_template = InvoiceTemplate(
             id=self.selected_template_id,
@@ -926,10 +971,12 @@ class SettingsUI(ctk.CTkFrame):
             is_active=self.is_active_var.get(),
             header_image_path=self.header_image_path_var.get() or None,
             footer_image_path=self.footer_image_path_var.get() or None,
-            background_image_path=self.background_image_path_var.get() or None,
-            background_opacity=effective_background_opacity
+            # تغییر: background_image_path و background_opacity ارسال نمی‌شود
+            # background_image_path=self.background_image_path_var.get() or None,
+            # background_opacity=effective_background_opacity
         )
         
+        # در اینجا `temp_template` که حاوی مسیرهای رشته‌ای هست رو به پنجره پیش‌نمایش پاس میدیم
         InvoiceTemplatePreviewWindow(self.master, temp_template, self.ui_colors, self.base_font, self.heading_font) 
 
     def show_sub_frame(self, page_name):
@@ -1046,6 +1093,17 @@ if __name__ == "__main__":
         temp_db_manager.create_tables()
         temp_db_manager.migrate_database()
         temp_db_manager.close()
+
+    from invoice_template_manager import InvoiceTemplateManager
+    tmpl_man = InvoiceTemplateManager()
+    if not tmpl_man.get_all_templates(active_only=False)[0]:
+        tmpl_man.add_template(InvoiceTemplate(
+            template_name="قالب پیش‌فرض",
+            template_type="PDF_Standard",
+            required_fields=["invoice_number", "customer_name", "total_amount"],
+            default_settings={"tax_percentage": 9, "discount_editable": True},
+            is_active=1
+        ))
 
     settings_frame = SettingsUI(root, temp_db_manager, test_ui_colors, base_font_tuple, heading_font_tuple, button_font_tuple, nav_button_font_tuple)
     settings_frame.pack(fill="both", expand=True)
