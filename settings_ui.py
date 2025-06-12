@@ -2,17 +2,17 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, ttk
 import os
-from PIL import Image, ImageTk # ImageTk اضافه شد
+from PIL import Image, ImageTk 
 import json
-from bs4 import BeautifulSoup # اضافه شد
-import re # اضافه شد
-from collections import defaultdict # اضافه شد
+from bs4 import BeautifulSoup 
+import re 
+from collections import defaultdict 
 
 from settings_manager import SettingsManager
 from service_manager import ServiceManager
-from models import AppSettings, Service, InvoiceTemplate
+from models import AppSettings, Service, InvoiceTemplate 
 from db_manager import DBManager, DATABASE_NAME
-from invoice_template_manager import InvoiceTemplateManager
+from invoice_template_manager import InvoiceTemplateManager 
 
 class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
     def __init__(self, master, template: InvoiceTemplate, ui_colors, base_font, heading_font):
@@ -25,12 +25,12 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
 
-        a4_width_pt = 595 # A4 width in points
-        a4_height_pt = 842 # A4 height in points
+        self.a4_width_pt = 595 # A4 width in points
+        self.a4_height_pt = 842 # A4 height in points
 
         # Use A4 dimensions for window size, scaled down for preview
-        window_width = int(a4_width_pt * 0.8) # Scale down for preview window
-        window_height = int(a4_height_pt * 0.8)
+        window_width = int(self.a4_width_pt * 0.8) # Scale down for preview window
+        window_height = int(self.a4_height_pt * 0.8)
         self.geometry(f"{window_width}x{window_height}")
         self.resizable(False, False)
 
@@ -64,20 +64,14 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
             self.after(50, self.draw_preview)
             return
         
-        # Assuming A4 dimensions in points for scaling
-        a4_width_pt = 595
-        a4_height_pt = 842
-
         # Scale factor from A4 points to canvas pixels
-        scale_x = canvas_width / a4_width_pt
-        scale_y = canvas_height / a4_height_pt
+        scale_x = canvas_width / self.a4_width_pt
+        scale_y = canvas_height / self.a4_height_pt
         
         # Draw background image if available
         if self.template.background_image_path and os.path.exists(self.template.background_image_path):
             try:
                 bg_pil_image = Image.open(self.template.background_image_path) 
-                
-                # Resize to fit canvas
                 bg_pil_image = bg_pil_image.resize((int(canvas_width), int(canvas_height)), Image.LANCZOS)
                 
                 if self.template.background_opacity < 1.0:
@@ -87,7 +81,6 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
                     alpha = Image.eval(alpha, lambda x: x * self.template.background_opacity) 
                     bg_pil_image.putalpha(alpha) 
                         
-                # Use ImageTk.PhotoImage for Tkinter Canvas
                 bg_tk_image = ImageTk.PhotoImage(bg_pil_image)
                 self.canvas_image_refs.append(bg_tk_image) # Keep reference
                 self.canvas.create_image(canvas_width/2, canvas_height/2, image=bg_tk_image)
@@ -99,19 +92,16 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         if self.template.header_image_path and os.path.exists(self.template.header_image_path):
             try:
                 header_pil_image = Image.open(self.template.header_image_path)
-                
-                # Resize to fit a reasonable height and maintain aspect ratio
-                target_height = 80 * scale_y # A proportional height
+                target_height = 80 * scale_y 
                 ratio = header_pil_image.width / header_pil_image.height
                 new_width = int(target_height * ratio)
                 
                 header_pil_image = header_pil_image.resize((new_width, int(target_height)), Image.LANCZOS)
-                header_tk_image = ImageTk.PhotoImage(header_pil_image) # Use ImageTk.PhotoImage
-                self.canvas_image_refs.append(header_tk_image) # Keep reference
+                header_tk_image = ImageTk.PhotoImage(header_pil_image) 
+                self.canvas_image_refs.append(header_tk_image) 
                 
-                # Position at top center, with some padding
                 x_pos = (canvas_width - new_width) / 2
-                y_pos = 10 * scale_y # small padding from top
+                y_pos = 10 * scale_y 
                 self.canvas.create_image(x_pos + new_width/2, y_pos + target_height/2, image=header_tk_image)
 
             except Exception as e:
@@ -122,19 +112,16 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         if self.template.footer_image_path and os.path.exists(self.template.footer_image_path):
             try:
                 footer_pil_image = Image.open(self.template.footer_image_path)
-                
-                # Resize to fit a reasonable height and maintain aspect ratio
-                target_height = 80 * scale_y # A proportional height
+                target_height = 80 * scale_y 
                 ratio = footer_pil_image.width / footer_pil_image.height
                 new_width = int(target_height * ratio)
                 
                 footer_pil_image = footer_pil_image.resize((new_width, int(target_height)), Image.LANCZOS)
-                footer_tk_image = ImageTk.PhotoImage(footer_pil_image) # Use ImageTk.PhotoImage
-                self.canvas_image_refs.append(footer_tk_image) # Keep reference
+                footer_tk_image = ImageTk.PhotoImage(footer_pil_image) 
+                self.canvas_image_refs.append(footer_tk_image) 
                 
-                # Position at bottom center, with some padding
                 x_pos = (canvas_width - new_width) / 2
-                y_pos = canvas_height - (target_height + 10 * scale_y) # 10 padding from bottom
+                y_pos = canvas_height - (target_height + 10 * scale_y) 
                 self.canvas.create_image(x_pos + new_width/2, y_pos + target_height/2, image=footer_tk_image)
 
             except Exception as e:
@@ -145,41 +132,119 @@ class InvoiceTemplatePreviewWindow(ctk.CTkToplevel):
         if 'static_text_elements' in self.template.template_settings:
             for element in self.template.template_settings['static_text_elements']:
                 text = element.get('text', '')
-                x = element.get('x_pos', 0) * scale_x
-                y_pdf = element.get('y_pos', 0) # Y-coordinate from PDF (bottom-left origin)
-                y_canvas = (a4_height_pt - y_pdf) * scale_y # Convert to Canvas (top-left origin)
+                x_pdf = element.get('x_pos', 0) 
+                y_pdf = element.get('y_pos', 0) 
+                
+                x_canvas = x_pdf * scale_x
+                y_canvas = (self.a4_height_pt - y_pdf) * scale_y 
+
                 align = element.get('align', 'right')
-                font_size = int(element.get('font_size', 10) * min(scale_x, scale_y)) # Scale font size too
+                font_size = int(element.get('font_size', 10) * min(scale_x, scale_y)) 
                 font_bold = element.get('font_bold', False)
                 
-                # Simple placeholder replacement for preview
-                # Just show the placeholder name for now or a sample value
-                text = re.sub(r'\{\{([a-zA-Z0-9_]+)\}\}', r'<\1>', text) 
+                # Replace placeholders with their names for preview
+                text_for_display = re.sub(r'\{\{([a-zA-Z0-9_]+)\}\}', r'<\1>', text) 
 
-                anchor = "e" # Default to right (east)
-                if align == 'left':
-                    anchor = "w" # West
-                elif align == 'center':
-                    anchor = "center"
-                
+                anchor_map = {
+                    'left': 'w',    # West (left aligned text, anchor on left)
+                    'right': 'e',   # East (right aligned text, anchor on right)
+                    'center': 'center'
+                }
+                anchor = anchor_map.get(align, 'e') # Default to right
+
                 font_tuple = (self.base_font[0], font_size, "bold" if font_bold else "")
                 
-                self.canvas.create_text(x, y_canvas, text=text, font=font_tuple, anchor=anchor, fill="black", justify=ctk.RIGHT if align == 'right' else ctk.LEFT)
+                self.canvas.create_text(x_canvas, y_canvas, text=text_for_display, font=font_tuple, anchor=anchor, fill="black")
 
         # Draw placeholder for table if table_configs is present
         if 'table_configs' in self.template.template_settings:
             table_config = self.template.template_settings['table_configs'].get('invoice_items_table', {})
-            x_start = table_config.get('x_start', 50) * scale_x
-            y_start_pdf = table_config.get('y_start', 400) # PDF bottom-left origin
-            y_start_canvas = (a4_height_pt - y_start_pdf) * scale_y # Canvas top-left origin
-            width = table_config.get('width', 500) * scale_x
+            x_start_pdf = table_config.get('x_start', 50)
+            y_start_pdf = table_config.get('y_start', 400) 
+            width_pdf = table_config.get('width', 500)
+            row_height_pdf = table_config.get('row_height', 20)
+
+            x_start_canvas = x_start_pdf * scale_x
+            y_start_canvas = (self.a4_height_pt - y_start_pdf) * scale_y 
+            width_canvas = width_pdf * scale_x
             
-            # Draw a rectangle for the table area
-            # 5 rows for example: header + 4 items
-            total_table_height = (5 * table_config.get('row_height', 20)) * scale_y 
+            total_table_height_canvas = (5 * row_height_pdf) * scale_y # Example: header + 4 item rows
             
-            self.canvas.create_rectangle(x_start, y_start_canvas, x_start + width, y_start_canvas + total_table_height, outline="gray", width=1)
-            self.canvas.create_text(x_start + width/2, y_start_canvas + (table_config.get('row_height', 20) * 0.5) * scale_y, text="جدول آیتم‌ها (پیش‌نمایش)", font=self.base_font, fill="gray", anchor=ctk.CENTER)
+            self.canvas.create_rectangle(x_start_canvas, y_start_canvas, x_start_canvas + width_canvas, y_start_canvas + total_table_height_canvas, outline="gray", width=1)
+            # No general text like "جدول آیتم‌ها (پیش‌نمایش)" unless explicitly defined in HTML
+            
+            # Draw table headers (placeholders if defined in JSON)
+            if 'header_elements' in table_config:
+                for header_el in table_config['header_elements']:
+                    header_text = header_el.get('text', '')
+                    header_x_offset_pdf = header_el.get('x_offset', 0)
+                    header_align = header_el.get('align', 'right')
+                    header_font_size = int(header_el.get('font_size', 10) * min(scale_x, scale_y))
+                    header_font_bold = header_el.get('font_bold', False)
+
+                    header_x_canvas = (x_start_pdf + header_x_offset_pdf) * scale_x
+                    header_y_canvas = y_start_canvas + (row_height_pdf * 0.5) * scale_y # Center vertically in header row
+
+                    header_font_tuple = (self.base_font[0], header_font_size, "bold" if header_font_bold else "")
+                    
+                    header_anchor_map = {
+                        'left': 'w',
+                        'right': 'e',
+                        'center': 'center'
+                    }
+                    header_anchor = header_anchor_map.get(header_align, 'e')
+                    
+                    self.canvas.create_text(header_x_canvas, header_y_canvas, text=header_text, font=header_font_tuple, anchor=header_anchor, fill="black")
+
+            # Draw sample item rows (placeholders)
+            if 'item_field_configs' in table_config:
+                sample_item_data = {
+                    'item_row_num': '۱',
+                    'item_service_description': 'شرح نمونه خدمت',
+                    'item_quantity': '۱',
+                    'item_unit_price': '۱,۰۰۰',
+                    'item_total_price': '۱,۰۰۰'
+                }
+                for i in range(1, 5): # 4 sample rows
+                    row_y_canvas = y_start_canvas + (i * row_height_pdf) * scale_y + (row_height_pdf * 0.5 * scale_y) # Center in row
+                    for field_config in table_config['item_field_configs']:
+                        field_name = field_config.get('field', '')
+                        x_offset_pdf = field_config.get('x_offset', 0)
+                        item_align = field_config.get('align', 'right')
+                        item_font_size = int(field_config.get('font_size', 10) * min(scale_x, scale_y))
+                        item_font_bold = field_config.get('font_bold', False)
+
+                        item_x_canvas = (x_start_pdf + x_offset_pdf) * scale_x
+                        
+                        item_text = sample_item_data.get(field_name, f'<{field_name}>') # Use placeholder name if not found
+                        item_font_tuple = (self.base_font[0], item_font_size, "bold" if item_font_bold else "")
+                        item_anchor = anchor_map.get(item_align, 'e')
+
+                        self.canvas.create_text(item_x_canvas, row_y_canvas, text=item_text, font=item_font_tuple, anchor=item_anchor, fill="black")
+
+        # Draw signature block (if defined in JSON)
+        if 'signature_block_config' in self.template.template_settings:
+            sig_config = self.template.template_settings['signature_block_config']
+            
+            seller_x_pdf = sig_config.get('seller_signature_x', None)
+            seller_y_pdf = sig_config.get('seller_signature_y', None)
+            buyer_x_pdf = sig_config.get('buyer_signature_x', None)
+            buyer_y_pdf = sig_config.get('buyer_signature_y', None)
+
+            font_size_sig = int(10 * min(scale_x, scale_y))
+            font_tuple_sig = (self.base_font[0], font_size_sig, "bold")
+
+            if seller_x_pdf is not None and seller_y_pdf is not None:
+                seller_x_canvas = seller_x_pdf * scale_x
+                seller_y_canvas = (self.a4_height_pt - seller_y_pdf) * scale_y
+                self.canvas.create_text(seller_x_canvas, seller_y_canvas - (15 * scale_y), text="امضا و مهر فروشنده", font=font_tuple_sig, anchor="center", fill="black")
+                self.canvas.create_line(seller_x_canvas - (50 * scale_x), seller_y_canvas, seller_x_canvas + (50 * scale_x), seller_y_canvas, fill="black")
+
+            if buyer_x_pdf is not None and buyer_y_pdf is not None:
+                buyer_x_canvas = buyer_x_pdf * scale_x
+                buyer_y_canvas = (self.a4_height_pt - buyer_y_pdf) * scale_y
+                self.canvas.create_text(buyer_x_canvas, buyer_y_canvas - (15 * scale_y), text="امضا و مهر خریدار", font=font_tuple_sig, anchor="center", fill="black")
+                self.canvas.create_line(buyer_x_canvas - (50 * scale_x), buyer_y_canvas, buyer_x_canvas + (50 * scale_x), buyer_y_canvas, fill="black")
 
 
 class SettingsUI(ctk.CTkFrame):
@@ -534,9 +599,6 @@ class SettingsUI(ctk.CTkFrame):
             chk.pack(anchor="w", pady=2, padx=5)
             self.required_fields_vars[field] = var
 
-        # Removed default_tax_percentage_var and default_discount_editable_var entries
-        # These settings are now part of the JSON template_settings_textbox
-
         row_idx = 5 
 
         # Upload HTML Template section
@@ -866,7 +928,6 @@ class SettingsUI(ctk.CTkFrame):
         """
         این تابع HTML را تجزیه کرده و آن را به فرمت JSON برای template_settings تبدیل می‌کند.
         فقط عناصر با position: absolute و استایل‌های مربوطه را استخراج می‌کند.
-        برای مدیریت مختصات از پایین-چپ (PyMuPDF) به بالا-چپ (HTML/CSS) تبدیل می‌کند.
         
         Args:
             html_content (str): محتوای کامل فایل HTML.
@@ -878,7 +939,6 @@ class SettingsUI(ctk.CTkFrame):
         
         static_text_elements = []
         
-        # Default A4 dimensions in points
         a4_width_pt = 595
         a4_height_pt = 842 
 
@@ -886,7 +946,6 @@ class SettingsUI(ctk.CTkFrame):
         for el in soup.find_all(style=re.compile(r'position:\s*absolute')):
             style = el.get('style', '')
             
-            # Extract position
             left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
             top_match = re.search(r'top:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
             right_match = re.search(r'right:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
@@ -895,37 +954,28 @@ class SettingsUI(ctk.CTkFrame):
             
             if left_match:
                 x_pos = float(left_match.group(1))
-            elif right_match: # If right is specified, convert to left (assuming default A4 width 595)
+            elif right_match:
                 right_val = float(right_match.group(1))
-                # تقریب عرض متن برای محاسبه x_pos از right
-                text_len_estimate = len(el.get_text(strip=True)) * 6 # هر کاراکتر تقریبا 6pt
-                x_pos = a4_width_pt - right_val - text_len_estimate 
+                x_pos = a4_width_pt - right_val # For 'right' alignment, this is the position of the right edge of the text.
             
-            y_pos_html = 0.0 # Default value
+            y_pos_html = 0.0 
             if top_match:
                 y_pos_html = float(top_match.group(1))
             
-            # Convert y_pos from HTML (top-left origin) to PDF (bottom-left origin)
-            y_pos_pdf = a4_height_pt - y_pos_html
+            y_pos_pdf = a4_height_pt - y_pos_html # Convert HTML top-origin to PDF bottom-origin
 
-            # Extract font size
             font_size_match = re.search(r'font-size:\s*(\d+\.?\d*)\s*(pt|px|em)?', style)
-            font_size = float(font_size_match.group(1)) if font_size_match else 10 # Default to 10pt
+            font_size = float(font_size_match.group(1)) if font_size_match else 10 
             
-            # Extract font-weight (bold)
             font_bold = False
             font_weight_match = re.search(r'font-weight:\s*(bold|700)', style)
             if font_weight_match:
                 font_bold = True
             
-            # Extract text alignment
             text_align_match = re.search(r'text-align:\s*(left|right|center)', style)
-            align = text_align_match.group(1) if text_align_match else 'right' # Default to right
+            align = text_align_match.group(1) if text_align_match else 'right' 
 
-            # Extract text content and identify placeholders
             text_content = el.get_text(strip=True)
-            
-            # Find all placeholders in the text, e.g., {{invoice_number}}
             placeholders = re.findall(r'\{\{([a-zA-Z0-9_]+)\}\}', text_content)
             
             element_data = {
@@ -937,48 +987,133 @@ class SettingsUI(ctk.CTkFrame):
                 "font_bold": font_bold,
                 "can_contain_field": bool(placeholders),
                 "field_placeholders": placeholders,
-                "tag": el.name # For debugging or future advanced parsing
+                "tag": el.name 
             }
             static_text_elements.append(element_data)
         
-        # --- Default Settings for Template (can be extracted from HTML if needed, but not common) ---
-        # For now, these default settings are hardcoded or taken from previous state.
-        # In a full HTML template, you might have specific tags/elements for these.
-        # For this prototype, we'll assume default values if not explicitly defined by HTML.
-        default_settings = {
-            "tax_percentage": 9,
-            "discount_editable": True,
-        }
+        # --- Extract Table Configs ---
+        table_configs = {}
+        # Find a table element (e.g., <table id="invoice_items_table">)
+        invoice_table = soup.find('table', id='invoice_items_table')
+        if invoice_table:
+            # Get table position (assuming it also uses absolute positioning, or fallback)
+            table_style = invoice_table.get('style', '')
+            table_left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', table_style)
+            table_top_match = re.search(r'top:\s*(\d+\.?\d*)\s*(pt|px|em)?', table_style)
+            table_width_match = re.search(r'width:\s*(\d+\.?\d*)\s*(pt|px|em)?', table_style)
+            
+            table_x_start = float(table_left_match.group(1)) if table_left_match else 50
+            table_y_start_html = float(table_top_match.group(1)) if table_top_match else 400
+            table_width = float(table_width_match.group(1)) if table_width_match else 500
+            
+            table_y_start_pdf = a4_height_pt - table_y_start_html
 
-        # --- Table Configs (Placeholder for now, needs more detailed HTML structure from user) ---
-        table_configs = {
-            "invoice_items_table": {
-                "x_start": 50,  # Example: will be parsed from specific HTML table container
-                "y_start": 400, # Example: will be parsed
-                "width": 500,   # Example
-                "row_height": 20, # Example
-                "header_elements": [], # Example: will be parsed from table headers
-                "item_field_configs": [] # Example: will be parsed from item rows
+            header_elements = []
+            # Assuming headers are in <thead><th>...</th></thead>
+            for th in invoice_table.find_all('th'):
+                header_text = th.get_text(strip=True)
+                th_style = th.get('style', '')
+                # Try to get horizontal position (offset from table_x_start) and width if defined
+                th_left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', th_style) # Might not be directly in th
+                th_width_match = re.search(r'width:\s*(\d+\.?\d*)\s*(pt|px|em)?', th_style)
+                th_align_match = re.search(r'text-align:\s*(left|right|center)', th_style)
+
+                th_x_offset = float(th_left_match.group(1)) if th_left_match else 0 # If header has absolute left
+                th_width = float(th_width_match.group(1)) if th_width_match else 100
+                th_align = th_align_match.group(1) if th_align_match else 'right'
+                
+                header_elements.append({
+                    "text": header_text,
+                    "x_offset": round(th_x_offset, 2), # This is relative to table_x_start in current PDF generation logic
+                    "width": round(th_width, 2),
+                    "align": th_align,
+                    "font_size": 10, # Default, can be parsed from CSS
+                    "font_bold": True # Default, can be parsed from CSS
+                })
+
+            item_field_configs = []
+            # Parse one sample row (e.g., first <tr> in <tbody>) for field structure
+            sample_tr = invoice_table.find('tbody').find('tr') if invoice_table.find('tbody') else None
+            if sample_tr:
+                for td in sample_tr.find_all('td'):
+                    td_text = td.get_text(strip=True) # Contains placeholder like {{item_service_description}}
+                    td_style = td.get('style', '')
+                    td_left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', td_style)
+                    td_width_match = re.search(r'width:\s*(\d+\.?\d*)\s*(pt|px|em)?', td_style)
+                    td_align_match = re.search(r'text-align:\s*(left|right|center)', td_style)
+
+                    td_x_offset = float(td_left_match.group(1)) if td_left_match else 0
+                    td_width = float(td_width_match.group(1)) if td_width_match else 100
+                    td_align = td_align_match.group(1) if td_align_match else 'right'
+
+                    # Extract placeholder from text
+                    placeholder_match = re.search(r'\{\{([a-zA-Z0-9_]+)\}\}', td_text)
+                    field_name = placeholder_match.group(1) if placeholder_match else 'unknown_field'
+
+                    item_field_configs.append({
+                        "field": field_name,
+                        "x_offset": round(td_x_offset, 2),
+                        "width": round(td_width, 2),
+                        "align": td_align,
+                        "font_size": 10,
+                        "font_bold": False
+                    })
+            
+            table_configs['invoice_items_table'] = {
+                "x_start": round(table_x_start, 2),
+                "y_start": round(table_y_start_pdf, 2),
+                "width": round(table_width, 2),
+                "row_height": 20, # This needs to be parsed from CSS if available, or be a default
+                "header_elements": header_elements,
+                "item_field_configs": item_field_configs
             }
-        }
-        
-        # --- Signature Block Config (Placeholder for now) ---
-        signature_block_config = {
-            "seller_signature_x": 150,
-            "seller_signature_y": 100,
-            "buyer_signature_x": 450,
-            "buyer_signature_y": 100
-        }
 
+        # --- Extract Signature Block Config ---
+        signature_block_config = {}
+        # You'll need to define specific elements in your HTML for seller/buyer signatures
+        # For example, <div id="seller_signature_block" style="position: absolute; left: 150pt; top: 750pt;">امضا و مهر فروشنده</div>
+        
+        seller_sig_el = soup.find(id='seller_signature_block')
+        if seller_sig_el:
+            seller_style = seller_sig_el.get('style', '')
+            seller_left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', seller_style)
+            seller_top_match = re.search(r'top:\s*(\d+\.?\d*)\s*(pt|px|em)?', seller_style)
+            
+            if seller_left_match and seller_top_match:
+                seller_x_pos = float(seller_left_match.group(1))
+                seller_y_pos_html = float(seller_top_match.group(1))
+                signature_block_config["seller_signature_x"] = round(seller_x_pos, 2)
+                signature_block_config["seller_signature_y"] = round(a4_height_pt - seller_y_pos_html, 2)
+
+        buyer_sig_el = soup.find(id='buyer_signature_block')
+        if buyer_sig_el:
+            buyer_style = buyer_sig_el.get('style', '')
+            buyer_left_match = re.search(r'left:\s*(\d+\.?\d*)\s*(pt|px|em)?', buyer_style)
+            buyer_top_match = re.search(r'top:\s*(\d+\.?\d*)\s*(pt|px|em)?', buyer_style)
+            
+            if buyer_left_match and buyer_top_match:
+                buyer_x_pos = float(buyer_left_match.group(1))
+                buyer_y_pos_html = float(buyer_top_match.group(1))
+                signature_block_config["buyer_signature_x"] = round(buyer_x_pos, 2)
+                signature_block_config["buyer_signature_y"] = round(a4_height_pt - buyer_y_pos_html, 2)
+
+
+        # --- Extract Background Image and Opacity from HTML (e.g., from <body> style) ---
+        body_style = soup.find('body').get('style', '') if soup.find('body') else ''
+        bg_image_match = re.search(r'background-image:\s*url\([\'"]?([^\)]+)[\'"]?\);?', body_style)
+        bg_opacity_match = re.search(r'opacity:\s*(\d+\.?\d*);?', body_style)
+
+        background_image_path = bg_image_match.group(1) if bg_image_match else None
+        background_opacity = float(bg_opacity_match.group(1)) if bg_opacity_match else 1.0
+
+        # --- Combine all extracted data ---
         template_settings = {
-            "default_settings": default_settings, # General settings like tax, discount editable
+            "default_settings": {"tax_percentage": 9, "discount_editable": True}, # These would be hardcoded or from a separate config in HTML
             "static_text_elements": static_text_elements,
             "table_configs": table_configs,
             "signature_block_config": signature_block_config,
-            # Image paths in template_settings (optional, if you want them defined in JSON too)
-            # Otherwise, they are defined in the InvoiceTemplate object directly.
-            "background_image_path": self.background_image_path_var.get() or None,
-            "background_opacity": self.background_opacity_var.get() if self.background_opacity_var.get() is not None else 1.0,
+            "background_image_path": background_image_path,
+            "background_opacity": background_opacity,
         }
         
         return template_settings
@@ -1053,16 +1188,6 @@ class SettingsUI(ctk.CTkFrame):
         header_image_path = self.header_image_path_var.get() or None
         footer_image_path = self.footer_image_path_var.get() or None
         
-        # background_image_path و background_opacity باید از داخل template_settings_json خوانده شوند
-        # و نه از متغیرهای UI، چون دیگر در UI قابل ویرایش نیستند.
-        # این بخش باید اصلاح شود تا background_image_path و background_opacity را از template_settings_json بگیرد
-        # و آن را به شیء InvoiceTemplate منتقل کند.
-        # اما در حال حاضر این فیلدها در خود InvoiceTemplate مدل وجود دارند.
-        # پس باید در اینجا نیز مقداردهی شوند.
-        # اگر از JSON میگیریم، باید از `template_settings_json.get(...)` استفاده شود.
-        # اگر از UI میگیریم، باید از `self.background_image_path_var.get()` و `self.background_opacity_var.get()` استفاده شود.
-        # با توجه به اینکه در create_invoice_templates_form این دو فیلد حالت readonly دارند
-        # پس مقادیرشان باید از JSON (یعنی template_settings_textbox) خوانده شود.
         background_image_path_from_json = template_settings_json.get("background_image_path", None)
         background_opacity_from_json = template_settings_json.get("background_opacity", 1.0)
 
@@ -1072,7 +1197,7 @@ class SettingsUI(ctk.CTkFrame):
             template_name=template_name,
             template_type=template_type,
             required_fields=required_fields,
-            template_settings=template_settings_json, # استفاده از JSON پارس شده
+            template_settings=template_settings_json, 
             is_active=is_active,
             header_image_path=header_image_path,
             footer_image_path=footer_image_path,
@@ -1135,11 +1260,6 @@ class SettingsUI(ctk.CTkFrame):
                 # Image paths
                 self.header_image_path_var.set(template_obj.header_image_path or "")
                 self.footer_image_path_var.set(template_obj.footer_image_path or "")
-                # Background image paths and opacity are now part of template_settings JSON
-                # so they are not directly set from template_obj.background_image_path etc.
-                # However, for the UI, we might still want to display them if they exist in the JSON
-                # Or, if they are solely for InvoiceGenerator, they don't need UI display here.
-                # Since they are in the model, they should be in the JSON.
                 self.background_image_path_var.set(template_obj.background_image_path or "")
                 self.background_opacity_var.set(template_obj.background_opacity if template_obj.background_opacity is not None else 1.0)
 
@@ -1173,15 +1293,14 @@ class SettingsUI(ctk.CTkFrame):
             template_name=self.template_name_var.get().strip(),
             template_type=self.template_type_var.get(),
             required_fields=[field for field, var in self.required_fields_vars.items() if var.get() == 1],
-            template_settings=current_template_settings, # Use JSON from textbox
+            template_settings=current_template_settings, 
             is_active=self.is_active_var.get(),
             header_image_path=self.header_image_path_var.get() or None,
             footer_image_path=self.footer_image_path_var.get() or None,
-            background_image_path=self.background_image_path_var.get() or None, # Read from UI var, will be populated from JSON on load
-            background_opacity=self.background_opacity_var.get() if self.background_opacity_var.get() is not None else 1.0 # Read from UI var
+            background_image_path=self.background_image_path_var.get() or None, 
+            background_opacity=self.background_opacity_var.get() if self.background_opacity_var.get() is not None else 1.0 
         )
         
-        # در اینجا `temp_template` که حاوی مسیرهای رشته‌ای هست رو به پنجره پیش‌نمایش پاس میدیم
         InvoiceTemplatePreviewWindow(self, temp_template, self.ui_colors, self.base_font, self.heading_font) 
 
     def show_sub_frame(self, page_name):
@@ -1256,7 +1375,7 @@ class SettingsUI(ctk.CTkFrame):
 if __name__ == "__main__":
     root = ctk.CTk()
     root.title("تنظیمات easy_invoice (تست مستقل)")
-    root.geometry("800x600") # Increased size for better view
+    root.geometry("800x600") 
     ctk.set_appearance_mode("light") 
     
     default_font_family = "Vazirmatn"
